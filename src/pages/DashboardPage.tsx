@@ -15,6 +15,9 @@ import {
   ArrowRight, BookOpen, MinusCircle, Award,
 } from 'lucide-react';
 
+// ✅ FIX: use the same base URL as LeaveContext.tsx (points to Railway backend, not Vercel)
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+
 // ✅ FIX: Hook is defined outside — always called at top level of each component
 function useLiveBalance(employeeId: string | undefined) {
   const [liveBalance, setLiveBalance] = useState<{
@@ -24,9 +27,11 @@ function useLiveBalance(employeeId: string | undefined) {
 
   useEffect(() => {
     if (!employeeId) return;
-    fetch(`/api/leave/balance/${employeeId}`, {
+    // ✅ FIX: use API_BASE_URL (was a relative path hitting the Vercel frontend)
+    // ✅ FIX: use 'levify_token' (was 'authToken', which doesn't exist — AuthContext saves it as 'levify_token')
+    fetch(`${API_BASE_URL}/leave/balance/${employeeId}`, {
       headers: {
-        Authorization: `Bearer ${localStorage.getItem('authToken')}`,
+        Authorization: `Bearer ${localStorage.getItem('levify_token')}`,
       },
     })
       .then((r) => r.json())
