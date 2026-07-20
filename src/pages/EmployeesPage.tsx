@@ -21,7 +21,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Users, Search, Eye, Filter, Download } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import { Users, Search, Eye, Filter, Download, Mail, Building2, Briefcase, CalendarCheck, CalendarX } from 'lucide-react';
 
 interface Employee {
   id: number;
@@ -45,6 +52,10 @@ export default function EmployeesPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [deptFilter, setDeptFilter] = useState('all');
+
+  // ✅ NEW: state for the details modal
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
   useEffect(() => {
     fetchEmployees();
@@ -112,6 +123,19 @@ export default function EmployeesPage() {
   const getPageDescription = () => {
     if (user?.role === 'ovcaa') return 'View and manage faculty information and leave balances';
     return 'View and manage employee information and leave balances';
+  };
+
+  // ✅ NEW: opens the modal for a given employee
+  const handleViewDetails = (emp: Employee) => {
+    setSelectedEmployee(emp);
+    setIsDetailsOpen(true);
+  };
+
+  // ✅ NEW: simple eligibility check — has at least half a day of either leave type available
+  const getEligibility = (emp: Employee) => {
+    const vl = Number(emp.vacation_leave_balance) || 0;
+    const sl = Number(emp.sick_leave_balance) || 0;
+    return vl >= 0.5 || sl >= 0.5;
   };
 
   return (
@@ -234,7 +258,8 @@ export default function EmployeesPage() {
                         {emp.sick_leave_balance ? Number(emp.sick_leave_balance).toFixed(2) : '0.00'}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm">
+                        {/* ✅ FIX: eye button now opens the details modal */}
+                        <Button variant="ghost" size="sm" onClick={() => handleViewDetails(emp)}>
                           <Eye className="h-4 w-4" />
                         </Button>
                       </TableCell>
@@ -252,6 +277,79 @@ export default function EmployeesPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ✅ NEW: Employee details modal */}
+      <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          {selectedEmployee && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-xl">{selectedEmployee.full_name}</DialogTitle>
+                <DialogDescription className="font-mono text-xs">
+                  {selectedEmployee.employee_id}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4 mt-2">
+                <div className="flex items-center gap-3 text-sm">
+                  <Mail className="h-4 w-4 text-muted-foreground" />
+                  <span>{selectedEmployee.email}</span>
+                </div>
+                <div className="flex items-center gap-3 text-sm">
+                  <Building2 className="h-4 w-4 text-muted-foreground" />
+                  <span>{selectedEmployee.department}</span>
+                </div>
+                <div className="flex items-center gap-3 text-sm">
+                  <Briefcase className="h-4 w-4 text-muted-foreground" />
+                  <span>{selectedEmployee.position}</span>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <Badge variant={selectedEmployee.employee_type === 'teaching' ? 'default' : 'secondary'}>
+                    {selectedEmployee.employee_type === 'teaching' ? 'Faculty' : 'Staff'}
+                  </Badge>
+                  <Badge variant="outline" className="capitalize">
+                    {selectedEmployee.employment_type}
+                  </Badge>
+                </div>
+
+                <div className="border-t pt-4 grid grid-cols-2 gap-4">
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs text-muted-foreground">Vacation Leave</p>
+                    <p className="text-lg font-semibold text-primary">
+                      {Number(selectedEmployee.vacation_leave_balance || 0).toFixed(2)} days
+                    </p>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs text-muted-foreground">Sick Leave</p>
+                    <p className="text-lg font-semibold text-primary">
+                      {Number(selectedEmployee.sick_leave_balance || 0).toFixed(2)} days
+                    </p>
+                  </div>
+                </div>
+
+                <div className="border-t pt-4 flex items-center gap-2">
+                  {getEligibility(selectedEmployee) ? (
+                    <>
+                      <CalendarCheck className="h-5 w-5 text-green-600" />
+                      <span className="text-sm font-medium text-green-700">
+                        Eligible to file for leave
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <CalendarX className="h-5 w-5 text-red-600" />
+                      <span className="text-sm font-medium text-red-700">
+                        Insufficient leave balance
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }
