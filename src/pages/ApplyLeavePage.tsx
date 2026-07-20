@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
@@ -209,20 +209,24 @@ export default function ApplyLeavePage() {
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
+                    {/* ✅ FIX: swapped the manual <div> category headers for the
+                        SelectLabel component so they pick up the sticky, styled
+                        treatment defined in select.tsx (instead of plain unstyled
+                        text mixed in with the selectable rows). */}
                     <SelectContent>
-                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">Regular Leave</div>
+                      <SelectLabel>Regular Leave</SelectLabel>
                       {leaveCategories.regular.map((type) => (
                         <SelectItem key={type} value={type}>
                           {leaveTypeLabels[type]}
                         </SelectItem>
                       ))}
-                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-t mt-1 pt-2">Special Leave</div>
+                      <SelectLabel className="mt-1">Special Leave</SelectLabel>
                       {leaveCategories.special.map((type) => (
                         <SelectItem key={type} value={type}>
                           {leaveTypeLabels[type]}
                         </SelectItem>
                       ))}
-                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-t mt-1 pt-2">Other</div>
+                      <SelectLabel className="mt-1">Other</SelectLabel>
                       {leaveCategories.other.map((type) => (
                         <SelectItem key={type} value={type}>
                           {leaveTypeLabels[type]}
