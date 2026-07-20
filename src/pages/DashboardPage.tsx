@@ -51,18 +51,26 @@ function useLiveBalance(employeeId: string | undefined) {
 
 function EmployeeDashboard({ employeeId }: { employeeId: string }) {
   const { user } = useAuth();
-  const { getEmployeeLeaveBalance, getEmployeeLeaveHistory, refreshBalance, isLoading } = useLeave();
+  const { getEmployeeLeaveBalance, getEmployeeLeaveHistory, refreshBalance, refreshRequests, isLoading } = useLeave();
 
   // ✅ FIX: Hook always called at top level — not inside a condition
   const liveBalance = useLiveBalance(employeeId);
 
   // ✅ FIX: Balance was only ever fetched once at login (in LeaveContext's mount effect),
   // so it went stale after approvals happened elsewhere. Refresh every time this page mounts.
+  //
+  // ✅ FIX: Also refresh the leave REQUESTS list here (not just balance). "Pending Requests"
+  // is derived from LeaveContext's `leaveRequests` state, which only gets refetched when
+  // `user` changes (e.g. login / full reload). Navigating back to the Dashboard after
+  // submitting a new request via client-side routing does NOT re-trigger that effect, so
+  // the stat card could show a stale count (e.g. 0) even though the request saved fine.
+  // Refreshing on every Dashboard mount guarantees it's always current.
   useEffect(() => {
     if (employeeId) {
       refreshBalance(employeeId);
+      refreshRequests();
     }
-  }, [employeeId, refreshBalance]);
+  }, [employeeId, refreshBalance, refreshRequests]);
 
   if (!user) return <div>Loading...</div>;
 
@@ -196,7 +204,15 @@ function EmployeeDashboard({ employeeId }: { employeeId: string }) {
 }
 
 function HRDashboard() {
-  const { getPendingRequests, leaveRequests, isLoading } = useLeave();
+  const { getPendingRequests, leaveRequests, refreshRequests, isLoading } = useLeave();
+
+  // ✅ FIX: HR/OVCAA/OVCAF dashboards derive everything from `leaveRequests`, which is
+  // only fetched on login. Refresh on mount so stats/lists are current when navigating
+  // back to the dashboard after processing requests elsewhere.
+  useEffect(() => {
+    refreshRequests();
+  }, [refreshRequests]);
+
   const pendingRequests   = getPendingRequests('hr') || [];
   const recentPending     = pendingRequests.slice(0, 5);
   const approvedThisMonth = leaveRequests.filter(r =>
@@ -267,7 +283,13 @@ function HRDashboard() {
 }
 
 function OVCAADashboard() {
-  const { getPendingRequests, leaveRequests } = useLeave();
+  const { getPendingRequests, leaveRequests, refreshRequests } = useLeave();
+
+  // ✅ FIX: refresh on mount — see note in HRDashboard above.
+  useEffect(() => {
+    refreshRequests();
+  }, [refreshRequests]);
+
   const pendingRequests = getPendingRequests('ovcaa') || [];
   const facultyRequests = leaveRequests.filter(r => r.department?.includes('College')) || [];
 
@@ -318,7 +340,13 @@ function OVCAADashboard() {
 }
 
 function OVCAFDashboard() {
-  const { getPendingRequests, leaveRequests } = useLeave();
+  const { getPendingRequests, leaveRequests, refreshRequests } = useLeave();
+
+  // ✅ FIX: refresh on mount — see note in HRDashboard above.
+  useEffect(() => {
+    refreshRequests();
+  }, [refreshRequests]);
+
   const pendingRequests      = getPendingRequests('ovcaf') || [];
   const monetizationRequests = leaveRequests.filter(r => r.isMonetization) || [];
 
