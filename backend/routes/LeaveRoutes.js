@@ -169,7 +169,9 @@ router.get('/monetization/:role', async (req, res) => {
     const { role } = req.params;
     console.log('🔵 Fetching MONETIZATION requests for role:', role);
     const [applications] = await db.query(
-      `SELECT la.*, u.full_name as employee_name, u.email, u.department, u.position,
+      // ✅ FIX: added u.salary_grade — was missing entirely, so the frontend's
+      // CSC monetization formula always computed against 0.
+      `SELECT la.*, u.full_name as employee_name, u.email, u.department, u.position, u.salary_grade,
         (SELECT COUNT(*) FROM leave_attachments WHERE leave_application_id = la.id) as attachment_count
        FROM leave_applications la
        JOIN users u ON la.employee_id = u.employee_id
