@@ -28,7 +28,10 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { Users, Search, Eye, Filter, Download, Mail, Building2, Briefcase, CalendarCheck, CalendarX } from 'lucide-react';
+import {
+  Users, Search, Eye, Filter, Download, Mail, Building2, Briefcase,
+  CalendarCheck, CalendarX, BookOpen, MinusCircle, Award,
+} from 'lucide-react';
 
 interface Employee {
   id: number;
@@ -41,6 +44,12 @@ interface Employee {
   employment_type: 'permanent' | 'contractual';
   vacation_leave_balance: number;
   sick_leave_balance: number;
+  special_privilege_leave_balance?: number;
+  forced_leave_balance?: number;
+  // ✅ NEW fields (now returned by the backend)
+  total_leave_credits?: number;
+  total_leave_availed?: number;
+  salary_grade?: number;
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
@@ -53,7 +62,7 @@ export default function EmployeesPage() {
   const [typeFilter, setTypeFilter] = useState('all');
   const [deptFilter, setDeptFilter] = useState('all');
 
-  // ✅ NEW: state for the details modal
+  // state for the details modal
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
@@ -125,13 +134,12 @@ export default function EmployeesPage() {
     return 'View and manage employee information and leave balances';
   };
 
-  // ✅ NEW: opens the modal for a given employee
   const handleViewDetails = (emp: Employee) => {
     setSelectedEmployee(emp);
     setIsDetailsOpen(true);
   };
 
-  // ✅ NEW: simple eligibility check — has at least half a day of either leave type available
+  // simple eligibility check — has at least half a day of either leave type available
   const getEligibility = (emp: Employee) => {
     const vl = Number(emp.vacation_leave_balance) || 0;
     const sl = Number(emp.sick_leave_balance) || 0;
@@ -258,7 +266,6 @@ export default function EmployeesPage() {
                         {emp.sick_leave_balance ? Number(emp.sick_leave_balance).toFixed(2) : '0.00'}
                       </TableCell>
                       <TableCell className="text-right">
-                        {/* ✅ FIX: eye button now opens the details modal */}
                         <Button variant="ghost" size="sm" onClick={() => handleViewDetails(emp)}>
                           <Eye className="h-4 w-4" />
                         </Button>
@@ -278,9 +285,9 @@ export default function EmployeesPage() {
         </CardContent>
       </Card>
 
-      {/* ✅ NEW: Employee details modal */}
+      {/* Employee details modal */}
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[520px]">
           {selectedEmployee && (
             <>
               <DialogHeader>
@@ -304,15 +311,19 @@ export default function EmployeesPage() {
                   <span>{selectedEmployee.position}</span>
                 </div>
 
-                <div className="flex items-center gap-2 pt-1">
+                <div className="flex items-center gap-2 pt-1 flex-wrap">
                   <Badge variant={selectedEmployee.employee_type === 'teaching' ? 'default' : 'secondary'}>
                     {selectedEmployee.employee_type === 'teaching' ? 'Faculty' : 'Staff'}
                   </Badge>
                   <Badge variant="outline" className="capitalize">
                     {selectedEmployee.employment_type}
                   </Badge>
+                  {selectedEmployee.salary_grade ? (
+                    <Badge variant="outline">SG - {selectedEmployee.salary_grade}</Badge>
+                  ) : null}
                 </div>
 
+                {/* Current balances */}
                 <div className="border-t pt-4 grid grid-cols-2 gap-4">
                   <div className="rounded-lg border p-3">
                     <p className="text-xs text-muted-foreground">Vacation Leave</p>
@@ -326,6 +337,37 @@ export default function EmployeesPage() {
                       {Number(selectedEmployee.sick_leave_balance || 0).toFixed(2)} days
                     </p>
                   </div>
+                </div>
+
+                {/* ✅ NEW: Lifetime totals */}
+                <div className="border-t pt-4 space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground flex items-center gap-2">
+                      <BookOpen className="h-4 w-4" />
+                      Total Leave Credits (Lifetime)
+                    </span>
+                    <span className="font-medium">
+                      {Number(selectedEmployee.total_leave_credits || 0).toFixed(2)} days
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground flex items-center gap-2">
+                      <MinusCircle className="h-4 w-4" />
+                      Total Leave Availed / Monetized
+                    </span>
+                    <span className="font-medium">
+                      {Number(selectedEmployee.total_leave_availed || 0).toFixed(2)} days
+                    </span>
+                  </div>
+                  {selectedEmployee.salary_grade ? (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground flex items-center gap-2">
+                        <Award className="h-4 w-4" />
+                        Salary Grade
+                      </span>
+                      <span className="font-medium">SG - {selectedEmployee.salary_grade}</span>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="border-t pt-4 flex items-center gap-2">

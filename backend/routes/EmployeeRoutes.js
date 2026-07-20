@@ -23,6 +23,9 @@ router.get('/all', async (req, res) => {
         sick_leave_balance,
         special_privilege_leave_balance,
         forced_leave_balance,
+        total_leave_credits,
+        total_leave_availed,
+        salary_grade,
         role
       FROM users
       WHERE role = 'employee'
@@ -67,6 +70,8 @@ router.get('/:employee_id', async (req, res) => {
         sick_leave_balance,
         special_privilege_leave_balance,
         forced_leave_balance,
+        total_leave_credits,
+        total_leave_availed,
         role,
         salary_grade
       FROM users
