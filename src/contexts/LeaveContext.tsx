@@ -196,8 +196,9 @@ export function LeaveProvider({ children }: { children: ReactNode }) {
     return mapping[frontendType];
   };
 
-  // Shared mapper: backend application row -> frontend LeaveRequest shape
-  const mapApplication = async (app: BackendLeaveApplication, token: string | null): Promise<LeaveRequest> => {
+  // ✅ FIX: Wrapped in useCallback so it has a stable reference and can be safely
+  // listed as a dependency in refreshRequests / refreshAllRequests below.
+  const mapApplication = useCallback(async (app: BackendLeaveApplication, token: string | null): Promise<LeaveRequest> => {
     let attachments: LeaveAttachment[] = [];
 
     if (app.attachment_count && app.attachment_count > 0) {
@@ -249,7 +250,7 @@ export function LeaveProvider({ children }: { children: ReactNode }) {
       attachments,
       trail: app.trail || []
     };
-  };
+  }, []);
 
   const refreshRequests = useCallback(async () => {
     if (!user) return;
@@ -294,7 +295,8 @@ export function LeaveProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [user]);
+  // ✅ FIX: added mapApplication dependency
+  }, [user, mapApplication]);
 
   // Fetches EVERY leave application (all statuses, all employees) via /leave/history
   // Used by pages like "All Requests" that need the complete list, not just pending ones.
@@ -327,7 +329,8 @@ export function LeaveProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoadingAll(false);
     }
-  }, []);
+  // ✅ FIX: added mapApplication dependency
+  }, [mapApplication]);
 
   // FIX: Now fetches real data from the database instead of hardcoded values
   const refreshBalance = useCallback(async (employeeId: string) => {
