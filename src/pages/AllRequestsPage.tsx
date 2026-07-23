@@ -4,7 +4,6 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { StatCard } from '@/components/ui/stat-card';
 import { Card, CardContent } from '@/components/ui/card';
 import {
-  BarChart3,
   Calendar,
   FileText,
   TrendingUp,
@@ -19,7 +18,6 @@ interface Summary {
   approved: number;
   pending: number;
   rejected: number;
-  avgProcessingDays: number;
 }
 
 interface ApprovalStep {
@@ -58,14 +56,13 @@ const ROLE_LABELS: Record<string, string> = {
   ovcaf: 'OVCAF',
 };
 
-export default function HistoryPage() {
+export default function AllRequestsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [summary, setSummary] = useState<Summary>({
     totalRequests: 0,
     approved: 0,
     pending: 0,
     rejected: 0,
-    avgProcessingDays: 0,
   });
   const [history, setHistory] = useState<LeaveHistoryItem[]>([]);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
@@ -178,7 +175,10 @@ export default function HistoryPage() {
       ) : (
         <>
           {/* Summary Cards */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
+          {/* "Avg. Processing" card removed — its calculation always rounded
+              down to 0.0 for quickly-processed test data, which was confusing
+              rather than informative. */}
+          <div className="grid gap-4 md:grid-cols-3 mb-6">
             <StatCard
               title="Total Requests"
               value={summary.totalRequests}
@@ -198,13 +198,6 @@ export default function HistoryPage() {
               value={summary.pending}
               description="awaiting approval"
               icon={Calendar}
-              variant="primary"
-            />
-            <StatCard
-              title="Avg. Processing"
-              value={summary.avgProcessingDays.toFixed(1)}
-              description="days per request"
-              icon={BarChart3}
               variant="primary"
             />
           </div>
