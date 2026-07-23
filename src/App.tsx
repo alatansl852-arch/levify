@@ -15,6 +15,7 @@ import MonetizationPage from "./pages/MonetizationPage";
 import EmployeesPage from "./pages/EmployeesPage";
 import HistoryPage from "./pages/AllRequestsPage";
 import ProfilePage from "./pages/ProfilePage";
+import PrintLeaveForm from "./pages/PrintLeaveForm";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -65,6 +66,8 @@ function AppRoutes() {
       <Route path="/all-requests" element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
       <Route path="/employees" element={<ProtectedRoute><EmployeesPage /></ProtectedRoute>} />
       <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+      {/* Printable CSC leave form, opened after OVCAF gives final approval */}
+      <Route path="/print-leave/:id" element={<ProtectedRoute><PrintLeaveForm /></ProtectedRoute>} />
       
       {/* 404 */}
       <Route path="*" element={<NotFound />} />
