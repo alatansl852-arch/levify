@@ -202,8 +202,8 @@ export default function PendingRequestsPage() {
   const [loadingAttachments, setLoadingAttachments] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [remarks, setRemarks] = useState('');
-  // ✅ Holds the application that OVCAF just approved, so we can show a
-  // "Ready to Print" confirmation instead of just closing the dialog.
+  // ✅ Holds the application that just received its final approval, so we can
+  // show a "Ready to Print" confirmation instead of just closing the dialog.
   const [printReadyApp, setPrintReadyApp] = useState<CombinedApplication | null>(null);
 
   useEffect(() => {
@@ -309,9 +309,12 @@ export default function PendingRequestsPage() {
       if (data.success) {
         toast.success(`Application ${action} successfully`);
 
-        // ✅ If OVCAF just fully approved a request, this was the final step —
-        // show a Ready to Print confirmation instead of just closing the dialog.
-        if (user?.role === 'ovcaf' && action === 'approved' && viewRequest) {
+        // ✅ Trust the backend's own verdict (nextApprover === null means this
+        // WAS the final approval step) instead of the frontend's user.role,
+        // which can silently mismatch the DB's role casing/format.
+        const isFinalApproval = action === 'approved' && data.nextApprover === null;
+
+        if (isFinalApproval && viewRequest) {
           setPrintReadyApp(viewRequest);
           setViewRequest(null);
           setRemarks('');
@@ -748,7 +751,7 @@ export default function PendingRequestsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Ready to Print — shown only after OVCAF gives final approval */}
+      {/* Ready to Print — shown only after the request receives its final approval */}
       <Dialog open={!!printReadyApp} onOpenChange={() => setPrintReadyApp(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
