@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useLeave } from '@/contexts/LeaveContext';
+import { useLeave, LeaveStatus } from '@/contexts/LeaveContext';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { StatCard } from '@/components/ui/stat-card';
@@ -17,6 +17,16 @@ import {
 
 // ✅ FIX: use the same base URL as LeaveContext.tsx (points to Railway backend, not Vercel)
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+
+// ✅ FIX: proper type for monetization requests fetched directly from
+// /leave/monetization/:role (replaces the previous `any[]` which failed
+// ESLint's no-explicit-any rule).
+interface MonetizationRequest {
+  id: number;
+  employee_name: string;
+  days_count: number;
+  status: LeaveStatus;
+}
 
 // ✅ FIX: Hook is defined outside — always called at top level of each component
 function useLiveBalance(employeeId: string | undefined) {
@@ -204,20 +214,26 @@ function EmployeeDashboard({ employeeId }: { employeeId: string }) {
 }
 
 function HRDashboard() {
-  const { getPendingRequests, leaveRequests, refreshRequests, isLoading } = useLeave();
+  const { getPendingRequests, allRequests, refreshRequests, refreshAllRequests, isLoading } = useLeave();
 
-  // ✅ FIX: HR/OVCAA/OVCAF dashboards derive everything from `leaveRequests`, which is
-  // only fetched on login. Refresh on mount so stats/lists are current when navigating
-  // back to the dashboard after processing requests elsewhere.
+  // ✅ FIX: also refresh allRequests (full history) — needed for "Approved This Month",
+  // since leaveRequests (from /leave/pending/hr) only ever contains items still
+  // pending at HR and can never contain 'approved'/'hr_approved' statuses.
   useEffect(() => {
     refreshRequests();
-  }, [refreshRequests]);
+    refreshAllRequests();
+  }, [refreshRequests, refreshAllRequests]);
 
-  const pendingRequests   = getPendingRequests('hr') || [];
-  const recentPending     = pendingRequests.slice(0, 5);
-  const approvedThisMonth = leaveRequests.filter(r =>
-    r.status === 'approved' || r.status === 'hr_approved' || r.status === 'ovcaa_approved'
-  ).length;
+  const pendingRequests = getPendingRequests('hr') || [];
+  const recentPending    = pendingRequests.slice(0, 5);
+
+  // ✅ FIX: compute from allRequests (full history), not leaveRequests.
+  const now = new Date();
+  const approvedThisMonth = allRequests.filter((r) => {
+    if (r.status !== 'approved') return false;
+    const updated = r.updatedAt ? new Date(r.updatedAt) : new Date(r.createdAt);
+    return updated.getFullYear() === now.getFullYear() && updated.getMonth() === now.getMonth();
+  }).length;
 
   return (
     <>
@@ -283,25 +299,35 @@ function HRDashboard() {
 }
 
 function OVCAADashboard() {
-  const { getPendingRequests, leaveRequests, refreshRequests } = useLeave();
+  const { getPendingRequests, allRequests, refreshRequests, refreshAllRequests } = useLeave();
 
-  // ✅ FIX: refresh on mount — see note in HRDashboard above.
+  // ✅ FIX: also refresh allRequests — needed for "Endorsed" count.
   useEffect(() => {
     refreshRequests();
-  }, [refreshRequests]);
+    refreshAllRequests();
+  }, [refreshRequests, refreshAllRequests]);
 
   const pendingRequests = getPendingRequests('ovcaa') || [];
-  const facultyRequests = leaveRequests.filter(r => r.department?.includes('College')) || [];
+  // ✅ FIX: "Faculty Leave Requests" should reflect the pending-at-OVCAA queue,
+  // not the (now removed) full leaveRequests array.
+  const facultyRequests = pendingRequests.filter((r) => r.department?.includes('College')) || [];
+
+  // ✅ FIX: "Endorsed" must come from allRequests — once OVCAA endorses a request,
+  // its current_approver moves to 'ovcaf', so it disappears from /pending/ovcaa
+  // (leaveRequests) and would always compute to 0 if read from there.
+  const endorsedCount = allRequests.filter(
+    (r) => r.status === 'ovcaa_approved' || r.status === 'approved'
+  ).length;
 
   return (
     <>
       <PageHeader title="OVCAA Dashboard" description="Office of the Vice Chancellor for Academic Affairs" />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="For Academic Review"    value={pendingRequests.length}                                         description="HR-approved requests" icon={FileText}    variant="primary" />
-        <StatCard title="Faculty Leave Requests" value={facultyRequests.length}                                         description="this month"           icon={Users}       variant="primary" />
-        <StatCard title="Endorsed"               value={leaveRequests.filter(r => r.status === 'ovcaa_approved').length} description="to OVCAF"            icon={CheckCircle} variant="primary" />
-        <StatCard title="Returned"               value={0}                                                              description="for revision"         icon={AlertCircle} variant="primary" />
+        <StatCard title="For Academic Review"    value={pendingRequests.length} description="HR-approved requests" icon={FileText}    variant="primary" />
+        <StatCard title="Faculty Leave Requests" value={facultyRequests.length} description="this month"           icon={Users}       variant="primary" />
+        <StatCard title="Endorsed"               value={endorsedCount}          description="to OVCAF"            icon={CheckCircle} variant="primary" />
+        <StatCard title="Returned"               value={0}                      description="for revision"        icon={AlertCircle} variant="primary" />
       </div>
 
       <div className="mt-6">
@@ -340,25 +366,54 @@ function OVCAADashboard() {
 }
 
 function OVCAFDashboard() {
-  const { getPendingRequests, leaveRequests, refreshRequests } = useLeave();
+  const { getPendingRequests, allRequests, refreshRequests, refreshAllRequests } = useLeave();
+  const [monetizationCount, setMonetizationCount] = useState(0);
+  const [monetizationList, setMonetizationList] = useState<MonetizationRequest[]>([]);
 
-  // ✅ FIX: refresh on mount — see note in HRDashboard above.
   useEffect(() => {
     refreshRequests();
-  }, [refreshRequests]);
+    refreshAllRequests();
 
-  const pendingRequests      = getPendingRequests('ovcaf') || [];
-  const monetizationRequests = leaveRequests.filter(r => r.isMonetization) || [];
+    // ✅ FIX: monetization requests are EXCLUDED from /leave/pending/:role by the
+    // backend, so they must be fetched from the dedicated /leave/monetization/:role
+    // endpoint — the same one PendingRequestsPage already uses for its
+    // Monetization tab.
+    const token = localStorage.getItem('levify_token');
+    fetch(`${API_BASE_URL}/leave/monetization/ovcaf`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) {
+          setMonetizationCount(data.applications.length);
+          setMonetizationList(data.applications);
+        }
+      })
+      .catch((err) => console.error('❌ Failed to fetch monetization requests:', err));
+  }, [refreshRequests, refreshAllRequests]);
+
+  const pendingRequests = getPendingRequests('ovcaf') || [];
+
+  // ✅ FIX: "Approved" must come from allRequests, not leaveRequests.
+  // leaveRequests for ovcaf is scoped to items still awaiting ovcaf action —
+  // once approved, current_approver becomes null and it drops out of that list,
+  // so filtering leaveRequests for status === 'approved' always returned 0.
+  const now = new Date();
+  const approvedThisMonth = allRequests.filter((r) => {
+    if (r.status !== 'approved') return false;
+    const updated = r.updatedAt ? new Date(r.updatedAt) : new Date(r.createdAt);
+    return updated.getFullYear() === now.getFullYear() && updated.getMonth() === now.getMonth();
+  }).length;
 
   return (
     <>
       <PageHeader title="OVCAF Dashboard" description="Office of the Vice Chancellor for Administration and Finance" />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="For Final Approval"    value={pendingRequests.length}                                    description="OVCAA-endorsed requests" icon={FileText}    variant="primary" />
-        <StatCard title="Monetization Requests" value={monetizationRequests.length}                               description="pending review"          icon={Wallet}      variant="primary" />
-        <StatCard title="Approved"              value={leaveRequests.filter(r => r.status === 'approved').length} description="this month"              icon={CheckCircle} variant="primary" />
-        <StatCard title="Compliance Issues"     value={0}                                                         description="flagged requests"        icon={AlertCircle} variant="primary" />
+        <StatCard title="For Final Approval"    value={pendingRequests.length} description="OVCAA-endorsed requests" icon={FileText}    variant="primary" />
+        <StatCard title="Monetization Requests" value={monetizationCount}      description="pending review"          icon={Wallet}      variant="primary" />
+        <StatCard title="Approved"              value={approvedThisMonth}      description="this month"              icon={CheckCircle} variant="primary" />
+        <StatCard title="Compliance Issues"     value={0}                      description="flagged requests"        icon={AlertCircle} variant="primary" />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -392,14 +447,14 @@ function OVCAFDashboard() {
             <CardDescription>Leave credit monetization requests</CardDescription>
           </CardHeader>
           <CardContent>
-            {monetizationRequests.length > 0 ? (
+            {monetizationList.length > 0 ? (
               <div className="space-y-3">
-                {monetizationRequests.map((request) => (
+                {monetizationList.map((request) => (
                   <div key={request.id} className="flex items-center justify-between rounded-lg border p-4">
                     <div>
-                      <p className="font-medium">{request.employeeName}</p>
+                      <p className="font-medium">{request.employee_name}</p>
                       <p className="text-sm text-muted-foreground">
-                        {request.monetizationDays} days for monetization
+                        {request.days_count} days for monetization
                       </p>
                     </div>
                     <StatusBadge status={request.status} />

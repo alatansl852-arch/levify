@@ -34,8 +34,17 @@ router.get('/summary', async (req, res) => {
       `SELECT COUNT(*) as rejected FROM leave_applications 
        WHERE status IN ('rejected', 'hr_rejected', 'ovcaa_rejected') ${filter}`
     );
+
+    // ✅ FIX: EXTRACT(DAY FROM interval) only returns WHOLE/complete days.
+    // For fast-processed test/demo records (approved within minutes or hours),
+    // that always rounds down to 0, making the average look permanently 0.0
+    // even though real processing time exists.
+    //
+    // Using EXTRACT(EPOCH FROM interval) / 86400.0 gives the fractional number
+    // of days (e.g. 5 minutes -> ~0.0035 days) so the average reflects actual
+    // elapsed time instead of truncating everything under 24h to zero.
     const [avgResult] = await db.query(
-      `SELECT AVG(EXTRACT(DAY FROM (ovcaf_action_date - created_at))) as avg_days
+      `SELECT AVG(EXTRACT(EPOCH FROM (ovcaf_action_date - created_at)) / 86400.0) as avg_days
        FROM leave_applications 
        WHERE status = 'approved' AND ovcaf_action_date IS NOT NULL ${filter}`
     );
