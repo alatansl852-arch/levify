@@ -26,7 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Clock, CheckCircle, XCircle, Eye, FileText, Paperclip, Loader2 } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, Eye, FileText, Paperclip, Loader2, Printer } from 'lucide-react';
 import { toast } from 'sonner';
 import heic2any from 'heic2any';
 
@@ -202,6 +202,9 @@ export default function PendingRequestsPage() {
   const [loadingAttachments, setLoadingAttachments] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [remarks, setRemarks] = useState('');
+  // ✅ Holds the application that OVCAF just approved, so we can show a
+  // "Ready to Print" confirmation instead of just closing the dialog.
+  const [printReadyApp, setPrintReadyApp] = useState<CombinedApplication | null>(null);
 
   useEffect(() => {
     if (user?.role) {
@@ -305,7 +308,18 @@ export default function PendingRequestsPage() {
       const data = await response.json();
       if (data.success) {
         toast.success(`Application ${action} successfully`);
-        closeDialog();
+
+        // ✅ If OVCAF just fully approved a request, this was the final step —
+        // show a Ready to Print confirmation instead of just closing the dialog.
+        if (user?.role === 'ovcaf' && action === 'approved' && viewRequest) {
+          setPrintReadyApp(viewRequest);
+          setViewRequest(null);
+          setRemarks('');
+          setAttachments([]);
+        } else {
+          closeDialog();
+        }
+
         fetchAllApplications();
       } else {
         toast.error(data.message || 'Failed to process application');
@@ -729,6 +743,38 @@ export default function PendingRequestsPage() {
             >
               <CheckCircle className="mr-2 h-4 w-4" />
               {isProcessing ? 'Processing...' : 'Approve'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Ready to Print — shown only after OVCAF gives final approval */}
+      <Dialog open={!!printReadyApp} onOpenChange={() => setPrintReadyApp(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-success" />
+              Fully Approved
+            </DialogTitle>
+            <DialogDescription>
+              {printReadyApp?.application_number} has been fully approved. The CSC leave form
+              (Section 7) is ready to print for signature.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2">
+            <Button variant="outline" onClick={() => setPrintReadyApp(null)}>
+              Close
+            </Button>
+            <Button
+              onClick={() => {
+                if (printReadyApp) {
+                  window.open(`/print-leave/${printReadyApp.id}`, '_blank');
+                }
+                setPrintReadyApp(null);
+              }}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Open Printable Form
             </Button>
           </DialogFooter>
         </DialogContent>
