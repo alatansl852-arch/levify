@@ -11,7 +11,7 @@ import { Link } from 'react-router-dom';
 import { getLeaveTypeLabel, formatDate } from '@/lib/leave-utils';
 import {
   FileText, Calendar, CheckCircle, Clock,
-  TrendingUp, Users, AlertCircle, Wallet,
+  TrendingUp, Users, Wallet,
   ArrowRight, BookOpen, MinusCircle, Award,
 } from 'lucide-react';
 
@@ -246,9 +246,9 @@ function HRDashboard() {
         </Button>
       </PageHeader>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {/* ✅ "Processed Today" card removed — it was hardcoded to 0 with no real logic behind it */}
+      <div className="grid gap-4 md:grid-cols-3">
         <StatCard title="Pending Requests"    value={pendingRequests.length} description="awaiting HR review"  icon={Clock}       variant="primary" />
-        <StatCard title="Processed Today"     value={0}                      description="requests reviewed"   icon={CheckCircle} variant="primary" />
         <StatCard title="Total Employees"     value={200}                    description="faculty and staff"   icon={Users}       variant="primary" />
         <StatCard title="Approved This Month" value={approvedThisMonth}      description="leave requests"      icon={TrendingUp}  variant="primary" />
       </div>
@@ -323,11 +323,11 @@ function OVCAADashboard() {
     <>
       <PageHeader title="OVCAA Dashboard" description="Office of the Vice Chancellor for Academic Affairs" />
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {/* ✅ "Returned" card removed — it was hardcoded to 0 with no real logic behind it */}
+      <div className="grid gap-4 md:grid-cols-3">
         <StatCard title="For Academic Review"    value={pendingRequests.length} description="HR-approved requests" icon={FileText}    variant="primary" />
         <StatCard title="Faculty Leave Requests" value={facultyRequests.length} description="this month"           icon={Users}       variant="primary" />
         <StatCard title="Endorsed"               value={endorsedCount}          description="to OVCAF"            icon={CheckCircle} variant="primary" />
-        <StatCard title="Returned"               value={0}                      description="for revision"        icon={AlertCircle} variant="primary" />
       </div>
 
       <div className="mt-6">
@@ -409,11 +409,11 @@ function OVCAFDashboard() {
     <>
       <PageHeader title="OVCAF Dashboard" description="Office of the Vice Chancellor for Administration and Finance" />
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {/* ✅ "Compliance Issues" card removed — it was hardcoded to 0 with no real logic behind it */}
+      <div className="grid gap-4 md:grid-cols-3">
         <StatCard title="For Final Approval"    value={pendingRequests.length} description="OVCAA-endorsed requests" icon={FileText}    variant="primary" />
         <StatCard title="Monetization Requests" value={monetizationCount}      description="pending review"          icon={Wallet}      variant="primary" />
         <StatCard title="Approved"              value={approvedThisMonth}      description="this month"              icon={CheckCircle} variant="primary" />
-        <StatCard title="Compliance Issues"     value={0}                      description="flagged requests"        icon={AlertCircle} variant="primary" />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
