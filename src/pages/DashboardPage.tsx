@@ -14,12 +14,8 @@ import {
   ArrowRight,
 } from 'lucide-react';
 
-// ✅ FIX: use the same base URL as LeaveContext.tsx (points to Railway backend, not Vercel)
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
-// ✅ FIX: proper type for monetization requests fetched directly from
-// /leave/monetization/:role (replaces the previous `any[]` which failed
-// ESLint's no-explicit-any rule).
 interface MonetizationRequest {
   id: number;
   employee_name: string;
@@ -27,17 +23,16 @@ interface MonetizationRequest {
   status: LeaveStatus;
 }
 
-// ✅ FIX: Hook is defined outside — always called at top level of each component
+// ✅ Hook now tracks used and monetized separately (backend split)
 function useLiveBalance(employeeId: string | undefined) {
   const [liveBalance, setLiveBalance] = useState<{
-    totalLeaveAvailed: number;
+    totalLeaveUsed: number;
+    totalLeaveMonetized: number;
     totalLeaveCredits: number;
   } | null>(null);
 
   useEffect(() => {
     if (!employeeId) return;
-    // ✅ FIX: use API_BASE_URL (was a relative path hitting the Vercel frontend)
-    // ✅ FIX: use 'levify_token' (was 'authToken', which doesn't exist — AuthContext saves it as 'levify_token')
     fetch(`${API_BASE_URL}/leave/balance/${employeeId}`, {
       headers: {
         Authorization: `Bearer ${localStorage.getItem('levify_token')}`,
@@ -47,8 +42,9 @@ function useLiveBalance(employeeId: string | undefined) {
       .then((data) => {
         if (data.success) {
           setLiveBalance({
-            totalLeaveAvailed: data.balance.totalLeaveAvailed ?? data.balance.totalUsed ?? 0,
-            totalLeaveCredits: data.balance.totalLeaveCredits ?? 0,
+            totalLeaveUsed:      data.balance.totalUsed ?? 0,
+            totalLeaveMonetized: data.balance.totalMonetized ?? 0,
+            totalLeaveCredits:   data.balance.totalLeaveCredits ?? 0,
           });
         }
       })
@@ -62,18 +58,8 @@ function EmployeeDashboard({ employeeId }: { employeeId: string }) {
   const { user } = useAuth();
   const { getEmployeeLeaveBalance, getEmployeeLeaveHistory, refreshBalance, refreshRequests, isLoading } = useLeave();
 
-  // ✅ FIX: Hook always called at top level — not inside a condition
   const liveBalance = useLiveBalance(employeeId);
 
-  // ✅ FIX: Balance was only ever fetched once at login (in LeaveContext's mount effect),
-  // so it went stale after approvals happened elsewhere. Refresh every time this page mounts.
-  //
-  // ✅ FIX: Also refresh the leave REQUESTS list here (not just balance). "Pending Requests"
-  // is derived from LeaveContext's `leaveRequests` state, which only gets refetched when
-  // `user` changes (e.g. login / full reload). Navigating back to the Dashboard after
-  // submitting a new request via client-side routing does NOT re-trigger that effect, so
-  // the stat card could show a stale count (e.g. 0) even though the request saved fine.
-  // Refreshing on every Dashboard mount guarantees it's always current.
   useEffect(() => {
     if (employeeId) {
       refreshBalance(employeeId);
@@ -88,9 +74,10 @@ function EmployeeDashboard({ employeeId }: { employeeId: string }) {
   const recentRequests = history.slice(0, 3);
   const pendingCount   = history.filter((r) => r.status === 'pending').length;
 
-  const totalLeaveAvailed = liveBalance?.totalLeaveAvailed ?? user.total_leave_availed ?? 0;
-  const totalLeaveCredits = liveBalance?.totalLeaveCredits ?? user.total_leave_credits ?? 0;
-  const salaryGrade       = user.salary_grade ?? 0;
+  const totalLeaveUsed      = liveBalance?.totalLeaveUsed ?? user.total_leave_availed ?? 0;
+  const totalLeaveMonetized = liveBalance?.totalLeaveMonetized ?? 0;
+  const totalLeaveCredits   = liveBalance?.totalLeaveCredits ?? user.total_leave_credits ?? 0;
+  const salaryGrade         = user.salary_grade ?? 0;
 
   return (
     <>
@@ -106,18 +93,19 @@ function EmployeeDashboard({ employeeId }: { employeeId: string }) {
         </Button>
       </PageHeader>
 
-      {/* Row 1 — 3 cards (Total Used removed — was a duplicate of Total Leave Availed below) */}
+      {/* Row 1 — 3 cards */}
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard title="Vacation Leave"   value={balance?.vacationLeave?.toFixed(2) || '0.00'} description="days available"    variant="primary" />
         <StatCard title="Sick Leave"       value={balance?.sickLeave?.toFixed(2)     || '0.00'} description="days available"    variant="primary" />
         <StatCard title="Pending Requests" value={pendingCount}                                  description="awaiting approval" variant="primary" />
       </div>
 
-      {/* Row 2 — 3 cards */}
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
-        <StatCard title="Total Leave Credits" value={Number(totalLeaveCredits).toFixed(2)} description="lifetime credits earned"     variant="primary" />
-        <StatCard title="Total Leave Availed" value={Number(totalLeaveAvailed).toFixed(2)} description="total days used / monetized" variant="primary" />
-        <StatCard title="Salary Grade"        value={`SG - ${salaryGrade}`}                description="current salary grade"        variant="primary" />
+      {/* Row 2 — 4 cards: Credits, Used, Monetized, Salary Grade */}
+      <div className="mt-4 grid gap-4 md:grid-cols-4">
+        <StatCard title="Total Leave Credits"  value={Number(totalLeaveCredits).toFixed(2)}   description="lifetime credits earned"  variant="primary" />
+        <StatCard title="Total Days Used"      value={Number(totalLeaveUsed).toFixed(2)}      description="regular leave taken"      variant="primary" />
+        <StatCard title="Total Days Monetized" value={Number(totalLeaveMonetized).toFixed(2)} description="leave credits cashed out" variant="primary" />
+        <StatCard title="Salary Grade"         value={`SG - ${salaryGrade}`}                  description="current salary grade"     variant="primary" />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -195,8 +183,12 @@ function EmployeeDashboard({ employeeId }: { employeeId: string }) {
                   <span className="font-medium">{Number(totalLeaveCredits).toFixed(2)} days</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Total Leave Availed / Monetized</span>
-                  <span className="font-medium">{Number(totalLeaveAvailed).toFixed(2)} days</span>
+                  <span className="text-muted-foreground">Total Days Used</span>
+                  <span className="font-medium">{Number(totalLeaveUsed).toFixed(2)} days</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Total Days Monetized</span>
+                  <span className="font-medium">{Number(totalLeaveMonetized).toFixed(2)} days</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Salary Grade</span>
@@ -214,9 +206,6 @@ function EmployeeDashboard({ employeeId }: { employeeId: string }) {
 function HRDashboard() {
   const { getPendingRequests, allRequests, refreshRequests, refreshAllRequests, isLoading } = useLeave();
 
-  // ✅ FIX: also refresh allRequests (full history) — needed for "Approved This Month",
-  // since leaveRequests (from /leave/pending/hr) only ever contains items still
-  // pending at HR and can never contain 'approved'/'hr_approved' statuses.
   useEffect(() => {
     refreshRequests();
     refreshAllRequests();
@@ -225,7 +214,6 @@ function HRDashboard() {
   const pendingRequests = getPendingRequests('hr') || [];
   const recentPending    = pendingRequests.slice(0, 5);
 
-  // ✅ FIX: compute from allRequests (full history), not leaveRequests.
   const now = new Date();
   const approvedThisMonth = allRequests.filter((r) => {
     if (r.status !== 'approved') return false;
@@ -243,7 +231,6 @@ function HRDashboard() {
         </Button>
       </PageHeader>
 
-      {/* ✅ "Processed Today" card removed — it was hardcoded to 0 with no real logic behind it */}
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard title="Pending Requests"    value={pendingRequests.length} description="awaiting HR review"  variant="primary" />
         <StatCard title="Total Employees"     value={200}                    description="faculty and staff"   variant="primary" />
@@ -297,20 +284,14 @@ function HRDashboard() {
 function OVCAADashboard() {
   const { getPendingRequests, allRequests, refreshRequests, refreshAllRequests } = useLeave();
 
-  // ✅ FIX: also refresh allRequests — needed for "Endorsed" count.
   useEffect(() => {
     refreshRequests();
     refreshAllRequests();
   }, [refreshRequests, refreshAllRequests]);
 
   const pendingRequests = getPendingRequests('ovcaa') || [];
-  // ✅ FIX: "Faculty Leave Requests" should reflect the pending-at-OVCAA queue,
-  // not the (now removed) full leaveRequests array.
   const facultyRequests = pendingRequests.filter((r) => r.department?.includes('College')) || [];
 
-  // ✅ FIX: "Endorsed" must come from allRequests — once OVCAA endorses a request,
-  // its current_approver moves to 'ovcaf', so it disappears from /pending/ovcaa
-  // (leaveRequests) and would always compute to 0 if read from there.
   const endorsedCount = allRequests.filter(
     (r) => r.status === 'ovcaa_approved' || r.status === 'approved'
   ).length;
@@ -319,7 +300,6 @@ function OVCAADashboard() {
     <>
       <PageHeader title="OVCAA Dashboard" description="Office of the Vice Chancellor for Academic Affairs" />
 
-      {/* ✅ "Returned" card removed — it was hardcoded to 0 with no real logic behind it */}
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard title="For Academic Review"    value={pendingRequests.length} description="HR-approved requests" variant="primary" />
         <StatCard title="Faculty Leave Requests" value={facultyRequests.length} description="this month"           variant="primary" />
@@ -370,10 +350,6 @@ function OVCAFDashboard() {
     refreshRequests();
     refreshAllRequests();
 
-    // ✅ FIX: monetization requests are EXCLUDED from /leave/pending/:role by the
-    // backend, so they must be fetched from the dedicated /leave/monetization/:role
-    // endpoint — the same one PendingRequestsPage already uses for its
-    // Monetization tab.
     const token = localStorage.getItem('levify_token');
     fetch(`${API_BASE_URL}/leave/monetization/ovcaf`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -390,10 +366,6 @@ function OVCAFDashboard() {
 
   const pendingRequests = getPendingRequests('ovcaf') || [];
 
-  // ✅ FIX: "Approved" must come from allRequests, not leaveRequests.
-  // leaveRequests for ovcaf is scoped to items still awaiting ovcaf action —
-  // once approved, current_approver becomes null and it drops out of that list,
-  // so filtering leaveRequests for status === 'approved' always returned 0.
   const now = new Date();
   const approvedThisMonth = allRequests.filter((r) => {
     if (r.status !== 'approved') return false;
@@ -405,7 +377,6 @@ function OVCAFDashboard() {
     <>
       <PageHeader title="OVCAF Dashboard" description="Office of the Vice Chancellor for Administration and Finance" />
 
-      {/* ✅ "Compliance Issues" card removed — it was hardcoded to 0 with no real logic behind it */}
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard title="For Final Approval"    value={pendingRequests.length} description="OVCAA-endorsed requests" variant="primary" />
         <StatCard title="Monetization Requests" value={monetizationCount}      description="pending review"          variant="primary" />
@@ -482,7 +453,6 @@ export default function DashboardPage() {
 
   return (
     <DashboardLayout>
-      {/* ✅ FIX: Pass employeeId as prop so EmployeeDashboard can call useLiveBalance at its own top level */}
       {(user.role === 'staff' || user.role === 'faculty') && <EmployeeDashboard employeeId={user.employeeId} />}
       {user.role === 'hr'    && <HRDashboard />}
       {user.role === 'ovcaa' && <OVCAADashboard />}

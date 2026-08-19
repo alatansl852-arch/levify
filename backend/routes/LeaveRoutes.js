@@ -169,8 +169,6 @@ router.get('/monetization/:role', async (req, res) => {
     const { role } = req.params;
     console.log('🔵 Fetching MONETIZATION requests for role:', role);
     const [applications] = await db.query(
-      // ✅ FIX: added u.salary_grade — was missing entirely, so the frontend's
-      // CSC monetization formula always computed against 0.
       `SELECT la.*, u.full_name as employee_name, u.email, u.department, u.position, u.salary_grade,
         (SELECT COUNT(*) FROM leave_attachments WHERE leave_application_id = la.id) as attachment_count
        FROM leave_applications la
@@ -250,19 +248,11 @@ router.post('/process/:id', async (req, res) => {
         );
         console.log('✅ total_leave_availed updated for:', application.employee_id, '+', application.days_count);
 
-        // ✅ FIXED: use isTruthy() instead of raw !value — DB may return '0'/'1' as
-        // strings, and in JS the string '0' is truthy, which was silently skipping
-        // the balance deduction for ALL regular (non-monetized) leave applications.
         const isMonetized   = isTruthy(application.monetize_credits);
         const isCommutation = isTruthy(application.commutation_requested);
 
-        // ✅ UPDATED: Monetization now DEDUCTS balance too — cashing out leave
-        // credits still consumes them. Only commutation is skipped (different
-        // nature — not a "use" of leave). Change this if commutation should
-        // also deduct.
         if (!isCommutation) {
 
-          // ✅ FIXED: All leave types mapped to their balance columns
           const leaveTypeMap = {
             'Vacation Leave':            'vacation_leave_balance',
             'Sick Leave':                'sick_leave_balance',
@@ -310,13 +300,11 @@ router.post('/process/:id', async (req, res) => {
       [id, approverIdInt, approver_role, action, remarks]
     );
 
-    // Notify the employee about the status change
     await notifyEmployee(
       application.employee_id, id,
       employeeNotifType, employeeNotifTitle, employeeNotifMessage
     );
 
-    // Notify the next approver group (if forwarding)
     if (nextApprover && action === 'approved') {
       await notifyApprovers(
         nextApprover, id,
@@ -408,16 +396,32 @@ router.get('/balance/:employee_id', async (req, res) => {
     const special  = parseFloat(user.special_privilege_leave_balance) || 0;
     const forced   = parseFloat(user.forced_leave_balance) || 0;
 
-    // Live sum of approved leave_applications filed through the system
+    // ✅ SPLIT: live sum of approved REGULAR (non-monetized, non-commutation) leave only
     const [usedResult] = await db.query(
       `SELECT COALESCE(SUM(days_count), 0) as total_used 
        FROM leave_applications 
-       WHERE employee_id = $1 AND status = 'approved'`,
+       WHERE employee_id = $1 AND status = 'approved'
+         AND (monetize_credits = false OR monetize_credits IS NULL)
+         AND (commutation_requested = false OR commutation_requested IS NULL)`,
       [employee_id]
     );
     const liveUsed = parseFloat(usedResult[0].total_used) || 0;
 
-    // ✅ Use whichever is larger — protects historically imported data
+    // ✅ NEW: live sum of approved MONETIZED leave only
+    const [monetizedResult] = await db.query(
+      `SELECT COALESCE(SUM(days_count), 0) as total_monetized 
+       FROM leave_applications 
+       WHERE employee_id = $1 AND status = 'approved'
+         AND monetize_credits = true`,
+      [employee_id]
+    );
+    const liveMonetized = parseFloat(monetizedResult[0].total_monetized) || 0;
+
+    // ✅ Use whichever is larger — protects historically imported data.
+    // NOTE: imported historical data (total_leave_availed) has no way to know
+    // how much of it was monetized vs. regularly used, so it's treated as
+    // "used" by default. Only live (post-launch) monetization requests show
+    // up under totalMonetized.
     const dbAvailed = parseFloat(user.total_leave_availed) || 0;
     const totalUsed = Math.max(dbAvailed, liveUsed);
 
@@ -429,7 +433,7 @@ router.get('/balance/:employee_id', async (req, res) => {
       );
     }
 
-    console.log('✅ Balance - VL:', vacation, 'SL:', sick, 'SPL:', special, 'FL:', forced, 'Used:', totalUsed);
+    console.log('✅ Balance - VL:', vacation, 'SL:', sick, 'SPL:', special, 'FL:', forced, 'Used:', totalUsed, 'Monetized:', liveMonetized);
 
     res.json({
       success: true,
@@ -439,9 +443,10 @@ router.get('/balance/:employee_id', async (req, res) => {
         specialPrivilege:  special,
         forcedLeave:       forced,
         totalEarned:       vacation + sick + special + forced,
-        totalUsed,
+        totalUsed,                          // regular leave days used only
+        totalMonetized:    liveMonetized,   // ✅ NEW — monetized days only
         totalLeaveCredits: parseFloat(user.total_leave_credits) || 0,
-        totalLeaveAvailed: totalUsed,
+        totalLeaveAvailed: totalUsed + liveMonetized, // kept for backward compat (combined)
       }
     });
   } catch (error) {
@@ -471,7 +476,6 @@ router.get('/statistics/:employee_id', async (req, res) => {
       [employee_id]
     );
 
-    // All-time used from leave_applications
     const [allTimeUsed] = await db.query(
       `SELECT COALESCE(SUM(days_count), 0) as all_time_used 
        FROM leave_applications 
@@ -479,7 +483,6 @@ router.get('/statistics/:employee_id', async (req, res) => {
       [employee_id]
     );
 
-    // ✅ Also read total_leave_availed from DB (may include historically imported data)
     const [userRow] = await db.query(
       `SELECT COALESCE(total_leave_availed, 0) as total_leave_availed FROM users WHERE employee_id = $1`,
       [employee_id]
