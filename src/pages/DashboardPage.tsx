@@ -104,7 +104,7 @@ function EmployeeDashboard({ employeeId }: { employeeId: string }) {
       <div className="mt-4 grid gap-4 md:grid-cols-4">
         <StatCard title="Total Leave Credits"  value={Number(totalLeaveCredits).toFixed(2)}   description="lifetime credits earned"  variant="primary" />
         <StatCard title="Total Days Used"      value={Number(totalLeaveUsed).toFixed(2)}      description="regular leave taken"      variant="primary" />
-        <StatCard title="Total Days Monetized" value={Number(totalLeaveMonetized).toFixed(2)} description="leave credits cashed out" variant="primary" />
+        <StatCard title="Total Days Monetized" value={Number(totalLeaveMonetized).toFixed(2)} description="leave credits" variant="primary" />
         <StatCard title="Salary Grade"         value={`SG - ${salaryGrade}`}                  description="current salary grade"     variant="primary" />
       </div>
 
