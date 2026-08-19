@@ -6,7 +6,7 @@ interface StatCardProps {
   title: string;
   value: string | number;
   description?: string;
-  icon: LucideIcon;
+  icon?: LucideIcon;
   trend?: {
     value: number;
     isPositive: boolean;
@@ -57,9 +57,11 @@ export function StatCard({
             </p>
           )}
         </div>
-        <div className={cn('rounded-lg p-3', iconVariantStyles[variant])}>
-          <Icon className="h-5 w-5" />
-        </div>
+        {Icon && (
+          <div className={cn('rounded-lg p-3', iconVariantStyles[variant])}>
+            <Icon className="h-5 w-5" />
+          </div>
+        )}
       </div>
     </div>
   );
