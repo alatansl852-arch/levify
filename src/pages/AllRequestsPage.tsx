@@ -4,9 +4,6 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { StatCard } from '@/components/ui/stat-card';
 import { Card, CardContent } from '@/components/ui/card';
 import {
-  Calendar,
-  FileText,
-  TrendingUp,
   ChevronDown,
   ChevronRight,
   Check,
@@ -183,21 +180,18 @@ export default function AllRequestsPage() {
               title="Total Requests"
               value={summary.totalRequests}
               description="leave requests"
-              icon={FileText}
               variant="primary"
             />
             <StatCard
               title="Approved"
               value={summary.approved}
               description="leave requests"
-              icon={TrendingUp}
               variant="primary"
             />
             <StatCard
               title="Pending"
               value={summary.pending}
               description="awaiting approval"
-              icon={Calendar}
               variant="primary"
             />
           </div>
