@@ -10,9 +10,9 @@ import React, { useEffect, useState } from 'react';
   import { Link } from 'react-router-dom';
   import { getLeaveTypeLabel, formatDate } from '@/lib/leave-utils';
   import {
-    FileText, Calendar, CheckCircle, Clock,
+    FileText, CheckCircle, Clock,
     TrendingUp, Users, Wallet,
-    ArrowRight, BookOpen, MinusCircle, Award,
+    ArrowRight,
   } from 'lucide-react';
 
   // ✅ FIX: use the same base URL as LeaveContext.tsx (points to Railway backend, not Vercel)
@@ -109,16 +109,16 @@ import React, { useEffect, useState } from 'react';
 
         {/* Row 1 — 3 cards (Total Used removed — was a duplicate of Total Leave Availed below) */}
         <div className="grid gap-4 md:grid-cols-3">
-          <StatCard title="Vacation Leave"   value={balance?.vacationLeave?.toFixed(2) || '0.00'} description="days available"    icon={Calendar}    variant="primary" />
-          <StatCard title="Sick Leave"       value={balance?.sickLeave?.toFixed(2)     || '0.00'} description="days available"    icon={CheckCircle} variant="primary" />
-          <StatCard title="Pending Requests" value={pendingCount}                                  description="awaiting approval" icon={Clock}       variant="primary" />
+          <StatCard title="Vacation Leave"   value={balance?.vacationLeave?.toFixed(2) || '0.00'} description="days available"    variant="primary" />
+          <StatCard title="Sick Leave"       value={balance?.sickLeave?.toFixed(2)     || '0.00'} description="days available"    variant="primary" />
+          <StatCard title="Pending Requests" value={pendingCount}                                  description="awaiting approval" variant="primary" />
         </div>
 
         {/* Row 2 — 3 cards */}
         <div className="mt-4 grid gap-4 md:grid-cols-3">
-          <StatCard title="Total Leave Credits" value={Number(totalLeaveCredits).toFixed(2)} description="lifetime credits earned"     icon={BookOpen}    variant="primary" />
-          <StatCard title="Total Leave Availed" value={Number(totalLeaveAvailed).toFixed(2)} description="total days used / monetized" icon={MinusCircle} variant="primary" />
-          <StatCard title="Salary Grade"        value={`SG - ${salaryGrade}`}                description="current salary grade"        icon={Award}       variant="primary" />
+          <StatCard title="Total Leave Credits" value={Number(totalLeaveCredits).toFixed(2)} description="lifetime credits earned"     variant="primary" />
+          <StatCard title="Total Leave Availed" value={Number(totalLeaveAvailed).toFixed(2)} description="total days used / monetized" variant="primary" />
+          <StatCard title="Salary Grade"        value={`SG - ${salaryGrade}`}                description="current salary grade"        variant="primary" />
         </div>
 
         <div className="mt-6 grid gap-6 lg:grid-cols-2">

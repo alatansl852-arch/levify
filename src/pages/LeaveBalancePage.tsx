@@ -1,10 +1,9 @@
-  import React, { useEffect } from 'react';
+import React, { useEffect } from 'react';
   import { useAuth } from '@/contexts/AuthContext';
   import { useLeave } from '@/contexts/LeaveContext';
   import { DashboardLayout } from '@/components/layout/DashboardLayout';
   import { PageHeader } from '@/components/layout/PageHeader';
   import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-  import { TrendingUp, Wallet, CheckCircle, Calendar } from 'lucide-react';
 
   const PRIMARY  = '#7C2D3A';
   const OVER_CAP = '#F59E0B';
@@ -51,58 +50,38 @@
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
           <Card>
             <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Earned</p>
-                  <p className="text-3xl font-bold text-primary">{totalEarned.toFixed(2)}</p>
-                  <p className="text-sm text-muted-foreground">days</p>
-                </div>
-                <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                  <TrendingUp className="h-6 w-6 text-primary" />
-                </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Total Earned</p>
+                <p className="text-3xl font-bold text-primary">{totalEarned.toFixed(2)}</p>
+                <p className="text-sm text-muted-foreground">days</p>
               </div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Used</p>
-                  {/* ✅ FIXED: now shows 2.00 instead of 2 */}
-                  <p className="text-3xl font-bold text-primary">{totalUsed.toFixed(2)}</p>
-                  <p className="text-sm text-muted-foreground">days</p>
-                </div>
-                <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Calendar className="h-6 w-6 text-primary" />
-                </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Total Used</p>
+                {/* ✅ FIXED: now shows 2.00 instead of 2 */}
+                <p className="text-3xl font-bold text-primary">{totalUsed.toFixed(2)}</p>
+                <p className="text-sm text-muted-foreground">days</p>
               </div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Available</p>
-                  <p className="text-3xl font-bold text-primary">{available.toFixed(2)}</p>
-                  <p className="text-sm text-muted-foreground">days</p>
-                </div>
-                <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                  <CheckCircle className="h-6 w-6 text-primary" />
-                </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Available</p>
+                <p className="text-3xl font-bold text-primary">{available.toFixed(2)}</p>
+                <p className="text-sm text-muted-foreground">days</p>
               </div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Monthly Accrual</p>
-                  <p className="text-3xl font-bold text-primary">2.50</p>
-                  <p className="text-sm text-muted-foreground">VL + SL</p>
-                </div>
-                <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Wallet className="h-6 w-6 text-primary" />
-                </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Monthly Accrual</p>
+                <p className="text-3xl font-bold text-primary">2.50</p>
+                <p className="text-sm text-muted-foreground">VL + SL</p>
               </div>
             </CardContent>
           </Card>
