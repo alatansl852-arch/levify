@@ -168,45 +168,6 @@ export default function LeaveBalancePage() {
         </CardContent>
       </Card>
 
-      {/* ── Computation Reference ── */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Leave Credit Computation Reference</CardTitle>
-          <CardDescription>
-            Based on CSC guidelines for vacation and sick leave earned per days/months of service
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b-2 border-gray-200">
-                  {['No. of Days', 'VAC', 'SICK', 'No. of Months', 'VAC', 'SICK'].map((h, i) => (
-                    <th key={i} className="p-2 text-center text-xs font-bold text-gray-500">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  { days: '1',  vacD: '0.042', sickD: '0.042', months: '1',  vacM: '1.25',  sickM: '1.25'  },
-                  { days: '5',  vacD: '0.208', sickD: '0.208', months: '3',  vacM: '3.75',  sickM: '3.75'  },
-                  { days: '10', vacD: '0.417', sickD: '0.417', months: '6',  vacM: '7.50',  sickM: '7.50'  },
-                  { days: '15', vacD: '0.625', sickD: '0.625', months: '9',  vacM: '11.25', sickM: '11.25' },
-                  { days: '20', vacD: '0.833', sickD: '0.833', months: '12', vacM: '15.00', sickM: '15.00' },
-                  { days: '24', vacD: '1.000', sickD: '1.000', months: '-',  vacM: '-',     sickM: '-'     },
-                ].map((row, i) => (
-                  <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FAFAFA' : '#fff' }}>
-                    {[row.days, row.vacD, row.sickD, row.months, row.vacM, row.sickM].map((cell, j) => (
-                      <td key={j} className="p-2 text-center text-xs text-gray-600">{cell}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-
       <div className="h-6" />
     </DashboardLayout>
   );
