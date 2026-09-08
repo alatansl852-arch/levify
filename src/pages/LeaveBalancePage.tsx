@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLeave } from '@/contexts/LeaveContext';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -8,6 +8,32 @@ import { StatCard } from '@/components/ui/stat-card';
 
 const PRIMARY  = '#7C2D3A';
 const OVER_CAP = '#F59E0B';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+
+// Same live-balance fetch used on the Dashboard — pulls the lifetime
+// "Total Leave Credits" number that isn't part of the LeaveContext balance shape.
+function useLifetimeCredits(employeeId: string | undefined) {
+  const [totalLeaveCredits, setTotalLeaveCredits] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!employeeId) return;
+    fetch(`${API_BASE_URL}/leave/balance/${employeeId}`, {
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('levify_token')}`,
+      },
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) {
+          setTotalLeaveCredits(data.balance.totalLeaveCredits ?? 0);
+        }
+      })
+      .catch((err) => console.error('❌ Failed to fetch lifetime credits:', err));
+  }, [employeeId]);
+
+  return totalLeaveCredits;
+}
 
 export default function LeaveBalancePage() {
   const { user } = useAuth();
@@ -22,6 +48,7 @@ export default function LeaveBalancePage() {
   }, [user?.employeeId, refreshBalance]);
 
   const balance = user ? getEmployeeLeaveBalance(user.employeeId) : undefined;
+  const totalLeaveCredits = useLifetimeCredits(user?.employeeId);
 
   const vl  = balance?.vacationLeave    ?? 0;
   const sl  = balance?.sickLeave        ?? 0;
@@ -50,9 +77,15 @@ export default function LeaveBalancePage() {
       {/* ── Summary Cards ── */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
         <StatCard
+          title="Total Leave Credits"
+          value={totalLeaveCredits !== null ? totalLeaveCredits.toFixed(2) : '—'}
+          description="lifetime earned"
+          variant="primary"
+        />
+        <StatCard
           title="Total Earned"
           value={totalEarned.toFixed(2)}
-          description="days"
+          description="this year, days"
           variant="primary"
         />
         <StatCard
@@ -65,12 +98,6 @@ export default function LeaveBalancePage() {
           title="Available"
           value={available.toFixed(2)}
           description="days"
-          variant="primary"
-        />
-        <StatCard
-          title="Monthly Accrual"
-          value="2.50"
-          description="VL + SL"
           variant="primary"
         />
       </div>

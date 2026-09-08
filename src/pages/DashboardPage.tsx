@@ -74,10 +74,10 @@ function EmployeeDashboard({ employeeId }: { employeeId: string }) {
   const recentRequests = history.slice(0, 3);
   const pendingCount   = history.filter((r) => r.status === 'pending').length;
 
-  const totalLeaveUsed      = liveBalance?.totalLeaveUsed ?? user.total_leave_availed ?? 0;
-  const totalLeaveMonetized = liveBalance?.totalLeaveMonetized ?? 0;
-  const totalLeaveCredits   = liveBalance?.totalLeaveCredits ?? user.total_leave_credits ?? 0;
-  const salaryGrade         = user.salary_grade ?? 0;
+  // Salary Grade and Total Days Monetized moved to Profile / Leave Balance page —
+  // this dashboard only needs the numbers people check daily.
+  const totalLeaveUsed    = liveBalance?.totalLeaveUsed ?? user.total_leave_availed ?? 0;
+  const totalLeaveCredits = liveBalance?.totalLeaveCredits ?? user.total_leave_credits ?? 0;
 
   return (
     <>
@@ -93,23 +93,44 @@ function EmployeeDashboard({ employeeId }: { employeeId: string }) {
         </Button>
       </PageHeader>
 
-      {/* Row 1 — 3 cards */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <StatCard title="Vacation Leave"   value={balance?.vacationLeave?.toFixed(2) || '0.00'} description="days available"    variant="primary" />
-        <StatCard title="Sick Leave"       value={balance?.sickLeave?.toFixed(2)     || '0.00'} description="days available"    variant="primary" />
-        <StatCard title="Pending Requests" value={pendingCount}                                  description="awaiting approval" variant="primary" />
+      {/* Summary — 4 cards, everything a person checks day-to-day */}
+      <div className="grid gap-4 md:grid-cols-4">
+        <StatCard
+          title="Vacation Leave"
+          value={balance?.vacationLeave?.toFixed(2) || '0.00'}
+          description="days available"
+          variant="primary"
+        />
+        <StatCard
+          title="Sick Leave"
+          value={balance?.sickLeave?.toFixed(2) || '0.00'}
+          description="days available"
+          variant="primary"
+        />
+        <StatCard
+          title="Total Credits"
+          value={Number(totalLeaveCredits).toFixed(2)}
+          description="lifetime earned"
+          variant="primary"
+        />
+        <StatCard
+          title="Pending Requests"
+          value={pendingCount}
+          description="awaiting approval"
+          variant="primary"
+        />
       </div>
 
-      {/* Row 2 — 4 cards: Credits, Used, Monetized, Salary Grade */}
-      <div className="mt-4 grid gap-4 md:grid-cols-4">
-        <StatCard title="Total Leave Credits"  value={Number(totalLeaveCredits).toFixed(2)}   description="lifetime credits earned"  variant="primary" />
-        <StatCard title="Total Days Used"      value={Number(totalLeaveUsed).toFixed(2)}      description="regular leave taken"      variant="primary" />
-        <StatCard title="Total Days Monetized" value={Number(totalLeaveMonetized).toFixed(2)} description="leave credits" variant="primary" />
-        <StatCard title="Salary Grade"         value={`SG - ${salaryGrade}`}                  description="current salary grade"     variant="primary" />
-      </div>
+      <p className="mt-3 text-sm text-muted-foreground">
+        {Number(totalLeaveUsed).toFixed(2)} days used this year ·{' '}
+        <Link to="/leave-balance" className="text-primary underline underline-offset-2">
+          full breakdown on Leave Balance
+        </Link>
+      </p>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        {/* Recent Leave Requests */}
+      {/* Recent Leave Requests — full width now that the duplicate
+          "Leave Balance Summary" card (same numbers as the row above) is gone */}
+      <div className="mt-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
@@ -142,60 +163,6 @@ function EmployeeDashboard({ employeeId }: { employeeId: string }) {
             ) : (
               <p className="text-center text-muted-foreground py-8">No leave requests yet</p>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Leave Balance Summary */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Leave Balance Summary</CardTitle>
-            <CardDescription>Your current leave credit balances</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {[
-                { label: 'Vacation Leave',    value: balance?.vacationLeave?.toFixed(2) || '0.00' },
-                { label: 'Sick Leave',        value: balance?.sickLeave?.toFixed(2)     || '0.00' },
-                { label: 'Special Privilege', value: String(balance?.specialPrivilege   || 3)     },
-                { label: 'Forced Leave',      value: String(balance?.forcedLeave        || 5)     },
-              ].map((item) => (
-                <div key={item.label} className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="h-2 w-2 rounded-full bg-primary" />
-                    <span>{item.label}</span>
-                  </div>
-                  <span className="font-semibold text-primary">{item.value} days</span>
-                </div>
-              ))}
-
-              <div className="border-t pt-4 mt-4">
-                <div className="flex items-center justify-between font-semibold">
-                  <span>Total Available</span>
-                  <span className="text-lg text-primary">
-                    {balance?.totalEarned?.toFixed(2) || '0.00'} days
-                  </span>
-                </div>
-              </div>
-
-              <div className="border-t pt-4 mt-2 space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Total Leave Credits (Lifetime)</span>
-                  <span className="font-medium">{Number(totalLeaveCredits).toFixed(2)} days</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Total Days Used</span>
-                  <span className="font-medium">{Number(totalLeaveUsed).toFixed(2)} days</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Total Days Monetized</span>
-                  <span className="font-medium">{Number(totalLeaveMonetized).toFixed(2)} days</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Salary Grade</span>
-                  <span className="font-medium">SG - {salaryGrade}</span>
-                </div>
-              </div>
-            </div>
           </CardContent>
         </Card>
       </div>
