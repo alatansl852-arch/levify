@@ -74,9 +74,6 @@ function EmployeeDashboard({ employeeId }: { employeeId: string }) {
   const recentRequests = history.slice(0, 3);
   const pendingCount   = history.filter((r) => r.status === 'pending').length;
 
-  // Salary Grade and Total Days Monetized moved to Profile / Leave Balance page —
-  // this dashboard only needs the numbers people check daily.
-  const totalLeaveUsed    = liveBalance?.totalLeaveUsed ?? user.total_leave_availed ?? 0;
   const totalLeaveCredits = liveBalance?.totalLeaveCredits ?? user.total_leave_credits ?? 0;
 
   return (
@@ -120,13 +117,6 @@ function EmployeeDashboard({ employeeId }: { employeeId: string }) {
           variant="primary"
         />
       </div>
-
-      <p className="mt-3 text-sm text-muted-foreground">
-        {Number(totalLeaveUsed).toFixed(2)} days used this year ·{' '}
-        <Link to="/leave-balance" className="text-primary underline underline-offset-2">
-          full breakdown on Leave Balance
-        </Link>
-      </p>
 
       {/* Recent Leave Requests — full width now that the duplicate
           "Leave Balance Summary" card (same numbers as the row above) is gone */}
