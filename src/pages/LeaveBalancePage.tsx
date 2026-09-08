@@ -64,8 +64,11 @@ export default function LeaveBalancePage() {
   ];
 
   const hasOverCap = leaveTypes.some(l => l.value > l.max);
-  const totalEarned = balance?.totalEarned ?? (vl + sl + spl + fl);
-  const available   = totalEarned - totalUsed;
+
+  // Available is now derived from Total Leave Credits (the one official lifetime
+  // number) instead of a separate "Total Earned" figure — having two similar-but-
+  // different totals on screen was confusing people.
+  const available = (totalLeaveCredits ?? 0) - totalUsed;
 
   return (
     <DashboardLayout>
@@ -74,18 +77,12 @@ export default function LeaveBalancePage() {
         description="Track your leave credits and accrual rates"
       />
 
-      {/* ── Summary Cards ── */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
+      {/* ── Summary Cards — 3 cards, one meaning each ── */}
+      <div className="grid gap-4 md:grid-cols-3 mb-6">
         <StatCard
           title="Total Leave Credits"
           value={totalLeaveCredits !== null ? totalLeaveCredits.toFixed(2) : '—'}
           description="lifetime earned"
-          variant="primary"
-        />
-        <StatCard
-          title="Total Earned"
-          value={totalEarned.toFixed(2)}
-          description="this year, days"
           variant="primary"
         />
         <StatCard
@@ -96,7 +93,7 @@ export default function LeaveBalancePage() {
         />
         <StatCard
           title="Available"
-          value={available.toFixed(2)}
+          value={totalLeaveCredits !== null ? available.toFixed(2) : '—'}
           description="days"
           variant="primary"
         />
