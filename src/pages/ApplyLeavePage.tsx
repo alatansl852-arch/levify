@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLeave, LeaveType } from '@/contexts/LeaveContext';
@@ -22,6 +22,111 @@ const leaveCategories = {
   other: ['terminal', 'other'] as LeaveType[],
 };
 
+// ---------------------------------------------------------------------------
+// CSC Omnibus Rules on Leave — per-leave-type date constraints.
+// Source: "Instructions and Requirements" (agency leave form, sections 1-15).
+// Each rule drives the min/max on the Inclusive Dates inputs and the
+// submit-time validation below. Types not listed fall back to `defaultRule`.
+// ---------------------------------------------------------------------------
+interface LeaveDateRule {
+  /** Must be filed at least this many days before the start date. */
+  minAdvanceDays?: number;
+  /** Max inclusive calendar-day span allowed (end - start + 1). */
+  maxDurationDays?: number;
+  /** If true, start/end dates may fall in the past (filed upon/after return). */
+  allowRetroactive?: boolean;
+  /** Short helper text shown under Inclusive Dates for this leave type. */
+  note: string;
+}
+
+const defaultRule: LeaveDateRule = {
+  allowRetroactive: false,
+  note: '',
+};
+
+const leaveDateRules: Partial<Record<LeaveType, LeaveDateRule>> = {
+  vacation: {
+    minAdvanceDays: 5,
+    allowRetroactive: false,
+    note: 'File at least 5 days before your start date, whenever possible.',
+  },
+  sick: {
+    allowRetroactive: true,
+    note: 'File immediately upon your return, or in advance. A medical certificate is required if filed 5+ days in advance, or if the leave exceeds 5 days.',
+  },
+  special_privilege: {
+    minAdvanceDays: 7,
+    maxDurationDays: 3,
+    allowRetroactive: false,
+    note: 'File at least 1 week before availment. Maximum of 3 days.',
+  },
+  forced: {
+    maxDurationDays: 5,
+    allowRetroactive: false,
+    note: 'Mandatory 5-day annual vacation leave, scheduled within the year.',
+  },
+  maternity: {
+    maxDurationDays: 105,
+    allowRetroactive: false,
+    note: 'Up to 105 days. File in advance with proof of pregnancy (ultrasound/doctor\u2019s certificate).',
+  },
+  paternity: {
+    maxDurationDays: 7,
+    allowRetroactive: false,
+    note: 'Up to 7 days. Requires proof of child\u2019s delivery (birth certificate, medical certificate, marriage contract).',
+  },
+  solo_parent: {
+    minAdvanceDays: 5,
+    maxDurationDays: 7,
+    allowRetroactive: false,
+    note: 'File at least 5 days in advance, with updated Solo Parent ID. Up to 7 days.',
+  },
+  study: {
+    maxDurationDays: 180,
+    allowRetroactive: false,
+    note: 'Up to 6 months, subject to agency requirements and an agency-employee contract.',
+  },
+  vawc: {
+    maxDurationDays: 10,
+    allowRetroactive: true,
+    note: 'Up to 10 days. May be filed in advance or immediately upon your return.',
+  },
+  rehabilitation: {
+    maxDurationDays: 180,
+    allowRetroactive: false,
+    note: 'Up to 6 months. File within 1 week of the accident, unless a longer period is warranted.',
+  },
+  special_emergency: {
+    maxDurationDays: 5,
+    allowRetroactive: false,
+    note: 'Up to 5 working days (straight or staggered) within 30 days of the calamity.',
+  },
+  calamity: {
+    maxDurationDays: 5,
+    allowRetroactive: false,
+    note: 'Up to 5 working days (straight or staggered) within 30 days of the calamity.',
+  },
+  adoption: {
+    allowRetroactive: false,
+    note: 'Requires an authenticated Pre-Adoptive Placement Authority (DSWD).',
+  },
+  terminal: {
+    allowRetroactive: false,
+    note: 'Requires proof of resignation, retirement, or separation from service.',
+  },
+  other: {
+    allowRetroactive: true,
+    note: '',
+  },
+};
+
+/** Adds `days` to a yyyy-mm-dd string and returns a yyyy-mm-dd string. */
+function addDaysToDateString(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split('T')[0];
+}
+
 export default function ApplyLeavePage() {
   const { user } = useAuth();
   const { addLeaveRequest, getEmployeeLeaveBalance } = useLeave();
@@ -44,6 +149,37 @@ export default function ApplyLeavePage() {
   const balance = user ? getEmployeeLeaveBalance(user.employeeId) : undefined;
   const numberOfDays = startDate && endDate ? calculateWorkingDays(startDate, endDate) : 0;
   const isWeekendOnlyRange = !!startDate && !!endDate && numberOfDays === 0;
+
+  // Inclusive calendar-day span (end - start + 1), used against maxDurationDays
+  // since CSC limits like "105 days" / "7 days" count calendar days, not
+  // working days (numberOfDays above is for balance deduction only).
+  const calendarDays = startDate && endDate
+    ? Math.round((new Date(`${endDate}T00:00:00`).getTime() - new Date(`${startDate}T00:00:00`).getTime()) / 86400000) + 1
+    : 0;
+
+  const dateRule = leaveDateRules[leaveType] ?? defaultRule;
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  // Earliest selectable start date for this leave type.
+  const minStartDate = dateRule.allowRetroactive
+    ? undefined
+    : dateRule.minAdvanceDays
+      ? addDaysToDateString(todayStr, dateRule.minAdvanceDays)
+      : todayStr;
+
+  // End date can't be before start date; if a max duration applies, cap it too.
+  const minEndDate = startDate || minStartDate;
+  const maxEndDate = dateRule.maxDurationDays && startDate
+    ? addDaysToDateString(startDate, dateRule.maxDurationDays - 1)
+    : undefined;
+
+  // Clear the picked dates whenever the leave type changes so a stale
+  // selection from a previous type (e.g. a 90-day range picked under
+  // "Study") can't linger as invalid under the newly selected type.
+  useEffect(() => {
+    setStartDate('');
+    setEndDate('');
+  }, [leaveType]);
 
   // Calculate monetization amount (example: based on daily rate)
   const dailyRate = 500; // This should come from user's actual salary data
@@ -102,6 +238,24 @@ export default function ApplyLeavePage() {
     if (numberOfDays === 0) {
       toast.error('Selected dates contain no working days', {
         description: 'Please choose a date range that includes at least one weekday.',
+      });
+      return;
+    }
+
+    // CSC advance-notice check (skip for leave types filed upon/after return)
+    if (!dateRule.allowRetroactive && minStartDate && startDate < minStartDate) {
+      toast.error('Advance notice required', {
+        description: dateRule.minAdvanceDays
+          ? `${leaveTypeLabels[leaveType]} must be filed at least ${dateRule.minAdvanceDays} day(s) before the start date.`
+          : `${leaveTypeLabels[leaveType]} cannot be backdated.`,
+      });
+      return;
+    }
+
+    // CSC max-duration check
+    if (dateRule.maxDurationDays && calendarDays > dateRule.maxDurationDays) {
+      toast.error('Duration exceeds the allowed limit', {
+        description: `${leaveTypeLabels[leaveType]} is limited to ${dateRule.maxDurationDays} day(s). You selected ${calendarDays} day(s).`,
       });
       return;
     }
@@ -321,6 +475,7 @@ export default function ApplyLeavePage() {
                       id="start_date"
                       type="date"
                       value={startDate}
+                      min={minStartDate}
                       onChange={(e) => setStartDate(e.target.value)}
                       required
                     />
@@ -331,17 +486,32 @@ export default function ApplyLeavePage() {
                       id="end_date"
                       type="date"
                       value={endDate}
+                      min={minEndDate}
+                      max={maxEndDate}
                       onChange={(e) => setEndDate(e.target.value)}
                       required
                     />
                   </div>
                 </div>
+
+                {dateRule.note && (
+                  <p className="mt-3 text-xs text-muted-foreground flex items-start gap-1.5">
+                    <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                    {dateRule.note}
+                  </p>
+                )}
+
                 {startDate && endDate && (
                   <p className="mt-3 text-sm font-medium">
                     Number of Working Days: <span className="text-primary">{numberOfDays}</span>
                     {isWeekendOnlyRange && (
                       <span className="ml-2 text-xs font-normal text-destructive">
                         (selected dates fall on a weekend — no working days in this range)
+                      </span>
+                    )}
+                    {dateRule.maxDurationDays && (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        ({calendarDays}/{dateRule.maxDurationDays} calendar days used)
                       </span>
                     )}
                   </p>
