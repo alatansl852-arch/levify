@@ -120,19 +120,35 @@ const leaveDateRules: Partial<Record<LeaveType, LeaveDateRule>> = {
   },
 };
 
-/** Adds `days` to a yyyy-mm-dd string and returns a yyyy-mm-dd string. */
+/**
+ * Formats a Date object as a local-time yyyy-mm-dd string.
+ * NOTE: Deliberately avoids `.toISOString()`, which converts to UTC first —
+ * in timezones ahead of UTC (e.g. UTC+8) that silently rolls local midnight
+ * back to the previous calendar day.
+ */
+function toDateString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Adds `days` to a yyyy-mm-dd string and returns a yyyy-mm-dd string, entirely in local time. */
 function addDaysToDateString(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T00:00:00`);
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const d = new Date(year, month - 1, day);
   d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
+  return toDateString(d);
 }
 
 export default function ApplyLeavePage() {
   const { user } = useAuth();
   const { addLeaveRequest, getEmployeeLeaveBalance } = useLeave();
   const navigate = useNavigate();
-  
-  const [leaveType, setLeaveType] = useState<LeaveType>('vacation');
+
+  // Leave type starts unselected so Inclusive Dates (and other type-specific
+  // sections) only appear once the user has actually made a choice.
+  const [leaveType, setLeaveType] = useState<LeaveType | ''>('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
@@ -157,8 +173,11 @@ export default function ApplyLeavePage() {
     ? Math.round((new Date(`${endDate}T00:00:00`).getTime() - new Date(`${startDate}T00:00:00`).getTime()) / 86400000) + 1
     : 0;
 
-  const dateRule = leaveDateRules[leaveType] ?? defaultRule;
-  const todayStr = new Date().toISOString().split('T')[0];
+  const dateRule = leaveType ? (leaveDateRules[leaveType] ?? defaultRule) : defaultRule;
+
+  // FIXED: built from local calendar fields (no UTC round-trip), so it can't
+  // drift a day depending on timezone/time-of-day.
+  const todayStr = toDateString(new Date());
 
   // Earliest selectable start date for this leave type.
   const minStartDate = dateRule.allowRetroactive
@@ -190,14 +209,14 @@ export default function ApplyLeavePage() {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    
+
     if (uploadedFiles.length + files.length > 5) {
       toast.error('Maximum 5 files allowed');
       return;
     }
 
     const validFiles: File[] = [];
-    
+
     for (const file of files) {
       if (file.size > 5 * 1024 * 1024) {
         toast.error(`File "${file.name}" is too large. Max size is 5MB`);
@@ -222,9 +241,14 @@ export default function ApplyLeavePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!user) return;
-    
+
+    if (!leaveType) {
+      toast.error('Please select a leave type');
+      return;
+    }
+
     if (!startDate || !endDate) {
       toast.error('Please select start and end dates');
       return;
@@ -275,13 +299,13 @@ export default function ApplyLeavePage() {
     try {
       // Get API base URL from environment variable
       const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-      
+
       // Get auth token
       const token = localStorage.getItem('levify_token');
-      
+
       // Create FormData to send files
       const formData = new FormData();
-      
+
       // Add all form fields
       formData.append('employee_id', user.employeeId);
       formData.append('leave_type', leaveType === 'other' ? otherLeaveType : leaveTypeLabels[leaveType]);
@@ -292,12 +316,12 @@ export default function ApplyLeavePage() {
       formData.append('reason', reason);
       formData.append('monetize_credits', monetizationRequested ? '1' : '0');
       formData.append('commutation_requested', commutation === 'requested' ? '1' : '0');
-      
+
       // Add hospital details if sick leave
       if (leaveType === 'sick' && hospitalDetails) {
         formData.append('hospital_details', hospitalDetails);
       }
-      
+
       // Add files to FormData
       uploadedFiles.forEach((file) => {
         formData.append('attachments', file);
@@ -359,9 +383,12 @@ export default function ApplyLeavePage() {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>Regular Leave Types</Label>
-                  <Select value={leaveType} onValueChange={(v) => setLeaveType(v as LeaveType)}>
+                  <Select
+                    value={leaveType}
+                    onValueChange={(v) => setLeaveType(v as LeaveType)}
+                  >
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="Select a leave type" />
                     </SelectTrigger>
                     {/* ✅ FIX: swapped the manual <div> category headers for the
                         SelectLabel component so they pick up the sticky, styled
@@ -394,9 +421,11 @@ export default function ApplyLeavePage() {
                       </SelectGroup>
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">
-                    {leaveTypeDescriptions[leaveType]}
-                  </p>
+                  {leaveType && (
+                    <p className="text-xs text-muted-foreground">
+                      {leaveTypeDescriptions[leaveType]}
+                    </p>
+                  )}
                 </div>
 
                 {/* Other Leave Type Specification */}
@@ -456,68 +485,71 @@ export default function ApplyLeavePage() {
               </CardContent>
             </Card>
 
-            {/* Date Selection */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Calendar className="h-5 w-5" />
-                  Inclusive Dates
-                </CardTitle>
-                <CardDescription>
-                  Select the start and end dates of your leave
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="start_date">Start Date</Label>
-                    <Input
-                      id="start_date"
-                      type="date"
-                      value={startDate}
-                      min={minStartDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      required
-                    />
+            {/* Date Selection — only shown once a leave type has been picked,
+                since the rules (min advance days, max duration) depend on it. */}
+            {leaveType && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Calendar className="h-5 w-5" />
+                    Inclusive Dates
+                  </CardTitle>
+                  <CardDescription>
+                    Select the start and end dates of your leave
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="start_date">Start Date</Label>
+                      <Input
+                        id="start_date"
+                        type="date"
+                        value={startDate}
+                        min={minStartDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="end_date">End Date</Label>
+                      <Input
+                        id="end_date"
+                        type="date"
+                        value={endDate}
+                        min={minEndDate}
+                        max={maxEndDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        required
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="end_date">End Date</Label>
-                    <Input
-                      id="end_date"
-                      type="date"
-                      value={endDate}
-                      min={minEndDate}
-                      max={maxEndDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      required
-                    />
-                  </div>
-                </div>
 
-                {dateRule.note && (
-                  <p className="mt-3 text-xs text-muted-foreground flex items-start gap-1.5">
-                    <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                    {dateRule.note}
-                  </p>
-                )}
+                  {dateRule.note && (
+                    <p className="mt-3 text-xs text-muted-foreground flex items-start gap-1.5">
+                      <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                      {dateRule.note}
+                    </p>
+                  )}
 
-                {startDate && endDate && (
-                  <p className="mt-3 text-sm font-medium">
-                    Number of Working Days: <span className="text-primary">{numberOfDays}</span>
-                    {isWeekendOnlyRange && (
-                      <span className="ml-2 text-xs font-normal text-destructive">
-                        (selected dates fall on a weekend — no working days in this range)
-                      </span>
-                    )}
-                    {dateRule.maxDurationDays && (
-                      <span className="ml-2 text-xs font-normal text-muted-foreground">
-                        ({calendarDays}/{dateRule.maxDurationDays} calendar days used)
-                      </span>
-                    )}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
+                  {startDate && endDate && (
+                    <p className="mt-3 text-sm font-medium">
+                      Number of Working Days: <span className="text-primary">{numberOfDays}</span>
+                      {isWeekendOnlyRange && (
+                        <span className="ml-2 text-xs font-normal text-destructive">
+                          (selected dates fall on a weekend — no working days in this range)
+                        </span>
+                      )}
+                      {dateRule.maxDurationDays && (
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          ({calendarDays}/{dateRule.maxDurationDays} calendar days used)
+                        </span>
+                      )}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Reason */}
             <Card>
@@ -547,8 +579,8 @@ export default function ApplyLeavePage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex items-center space-x-2">
-                  <Checkbox 
-                    id="monetization_checkbox" 
+                  <Checkbox
+                    id="monetization_checkbox"
                     checked={monetizationRequested}
                     onCheckedChange={(checked) => {
                       setMonetizationRequested(checked as boolean);
@@ -678,12 +710,14 @@ export default function ApplyLeavePage() {
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Leave Type:</span>
                     <span className="font-medium">
-                      {leaveType === 'other' && otherLeaveType 
-                        ? otherLeaveType 
-                        : leaveTypeLabels[leaveType]}
+                      {leaveType
+                        ? (leaveType === 'other' && otherLeaveType
+                            ? otherLeaveType
+                            : leaveTypeLabels[leaveType])
+                        : '—'}
                     </span>
                   </div>
-                  
+
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Duration:</span>
                     <span className="font-medium">
@@ -705,7 +739,7 @@ export default function ApplyLeavePage() {
                       <span className="font-medium">{endDate}</span>
                     </div>
                   )}
-                  
+
                   {monetizationRequested && monetizationDays && (
                     <>
                       <div className="flex justify-between text-sm border-t pt-2">
