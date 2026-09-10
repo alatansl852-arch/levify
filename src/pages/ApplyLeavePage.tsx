@@ -22,10 +22,30 @@ const leaveCategories = {
   other: ['terminal', 'other'] as LeaveType[],
 };
 
-const leaveCategoryLabels: Record<keyof typeof leaveCategories, string> = {
-  regular: 'Regular Leave',
-  special: 'Special Leave',
-  other: 'Other',
+// ---------------------------------------------------------------------------
+// Short "at a glance" duration/notice label shown beside each leave type in
+// the Select dropdown, so users don't have to open a type first to learn its
+// limit. Mirrors leaveDateRules below (minAdvanceDays/maxDurationDays), but
+// kept as its own map since a couple of types (e.g. sick leave, which is
+// allowRetroactive but also filed in advance) read better with custom text
+// than a mechanically-derived one.
+// ---------------------------------------------------------------------------
+const leaveTypeDurationLabels: Partial<Record<LeaveType, string>> = {
+  vacation: '5 days notice',
+  sick: 'upon return',
+  special_privilege: '3 days',
+  forced: '5 days',
+  maternity: '105 days',
+  paternity: '7 days',
+  solo_parent: '7 days',
+  study: '6 months',
+  vawc: '10 days',
+  rehabilitation: '6 months',
+  special_emergency: '5 days',
+  calamity: '5 days',
+  adoption: '—',
+  terminal: '—',
+  other: '—',
 };
 
 // ---------------------------------------------------------------------------
@@ -124,25 +144,6 @@ const leaveDateRules: Partial<Record<LeaveType, LeaveDateRule>> = {
     allowRetroactive: true,
     note: '',
   },
-};
-
-// Short duration labels shown in the Leave Types sidebar, next to each item.
-const leaveTypeDurations: Partial<Record<LeaveType, string>> = {
-  vacation: '5 days notice',
-  sick: 'File anytime',
-  special_privilege: 'Up to 3 days',
-  forced: '5 days / year',
-  maternity: 'Up to 105 days',
-  paternity: 'Up to 7 days',
-  solo_parent: 'Up to 7 days',
-  study: 'Up to 6 months',
-  vawc: 'Up to 10 days',
-  rehabilitation: 'Up to 6 months',
-  special_emergency: 'Up to 5 days',
-  calamity: 'Up to 5 days',
-  adoption: 'Per DSWD approval',
-  terminal: 'Upon separation',
-  other: 'Varies',
 };
 
 /**
@@ -262,12 +263,6 @@ export default function ApplyLeavePage() {
   const removeFile = (index: number) => {
     setUploadedFiles(prev => prev.filter((_, i) => i !== index));
     toast.success('File removed');
-  };
-
-  // Jump to the leave type from the sidebar, and scroll the form back to the
-  // Type of Leave card so the user sees the description/details update.
-  const handleSidebarSelect = (type: LeaveType) => {
-    setLeaveType(type);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -397,61 +392,9 @@ export default function ApplyLeavePage() {
       />
 
       <form onSubmit={handleSubmit}>
-        <div className="grid gap-6 lg:grid-cols-[240px_1fr_340px]">
-          {/* Leave Types Sidebar — desktop only, sticky while scrolling.
-              Mirrors the CSC Omnibus Rules categories, with each type's
-              allowed duration shown underneath. Clicking selects it, same
-              as the Select dropdown used on mobile below. */}
-          <div className="hidden lg:block">
-            <Card className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Leave Types</CardTitle>
-                <CardDescription className="text-xs">
-                  Click a type to select it
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {(Object.keys(leaveCategories) as (keyof typeof leaveCategories)[]).map((category) => (
-                  <div key={category}>
-                    <p className="text-[11px] font-semibold uppercase text-muted-foreground mb-1.5 tracking-wide">
-                      {leaveCategoryLabels[category]}
-                    </p>
-                    <div className="space-y-1">
-                      {leaveCategories[category].map((type) => {
-                        const isActive = leaveType === type;
-                        return (
-                          <button
-                            key={type}
-                            type="button"
-                            onClick={() => handleSidebarSelect(type)}
-                            className={`w-full text-left px-3 py-2 rounded-md transition-colors ${
-                              isActive
-                                ? 'bg-primary text-primary-foreground'
-                                : 'hover:bg-muted text-foreground'
-                            }`}
-                          >
-                            <span className="block text-sm font-medium leading-tight">
-                              {leaveTypeLabels[type]}
-                            </span>
-                            <span
-                              className={`block text-[11px] mt-0.5 ${
-                                isActive ? 'text-primary-foreground/80' : 'text-muted-foreground'
-                              }`}
-                            >
-                              {leaveTypeDurations[type] ?? '—'}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          </div>
-
+        <div className="grid gap-6 lg:grid-cols-3">
           {/* Main Form */}
-          <div className="space-y-6">
+          <div className="lg:col-span-2 space-y-6">
             {/* Leave Type Selection */}
             <Card>
               <CardHeader>
@@ -460,15 +403,11 @@ export default function ApplyLeavePage() {
                   Type of Leave
                 </CardTitle>
                 <CardDescription>
-                  {leaveType
-                    ? 'Selected from the leave types list'
-                    : 'Select the type of leave as prescribed by CSC Omnibus Rules'}
+                  Select the type of leave as prescribed by CSC Omnibus Rules
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Dropdown selector — only needed on mobile/tablet where the
-                    sidebar is hidden. Desktop users pick from the sidebar. */}
-                <div className="space-y-2 lg:hidden">
+                <div className="space-y-2">
                   <Label>Regular Leave Types</Label>
                   <Select
                     value={leaveType}
@@ -477,12 +416,19 @@ export default function ApplyLeavePage() {
                     <SelectTrigger>
                       <SelectValue placeholder="Select a leave type" />
                     </SelectTrigger>
-                    <SelectContent>
+                    {/* Widened so the day/month badge has room next to longer
+                        leave-type labels without wrapping. */}
+                    <SelectContent className="min-w-[22rem]">
                       <SelectGroup>
                         <SelectLabel>Regular Leave</SelectLabel>
                         {leaveCategories.regular.map((type) => (
                           <SelectItem key={type} value={type}>
-                            {leaveTypeLabels[type]} — {leaveTypeDurations[type]}
+                            <div className="flex items-center justify-between gap-4 w-full">
+                              <span>{leaveTypeLabels[type]}</span>
+                              <span className="text-xs text-muted-foreground shrink-0">
+                                {leaveTypeDurationLabels[type]}
+                              </span>
+                            </div>
                           </SelectItem>
                         ))}
                       </SelectGroup>
@@ -490,7 +436,12 @@ export default function ApplyLeavePage() {
                         <SelectLabel className="mt-1">Special Leave</SelectLabel>
                         {leaveCategories.special.map((type) => (
                           <SelectItem key={type} value={type}>
-                            {leaveTypeLabels[type]} — {leaveTypeDurations[type]}
+                            <div className="flex items-center justify-between gap-4 w-full">
+                              <span>{leaveTypeLabels[type]}</span>
+                              <span className="text-xs text-muted-foreground shrink-0">
+                                {leaveTypeDurationLabels[type]}
+                              </span>
+                            </div>
                           </SelectItem>
                         ))}
                       </SelectGroup>
@@ -498,19 +449,23 @@ export default function ApplyLeavePage() {
                         <SelectLabel className="mt-1">Other</SelectLabel>
                         {leaveCategories.other.map((type) => (
                           <SelectItem key={type} value={type}>
-                            {leaveTypeLabels[type]} — {leaveTypeDurations[type]}
+                            <div className="flex items-center justify-between gap-4 w-full">
+                              <span>{leaveTypeLabels[type]}</span>
+                              <span className="text-xs text-muted-foreground shrink-0">
+                                {leaveTypeDurationLabels[type]}
+                              </span>
+                            </div>
                           </SelectItem>
                         ))}
                       </SelectGroup>
                     </SelectContent>
                   </Select>
+                  {leaveType && (
+                    <p className="text-xs text-muted-foreground">
+                      {leaveTypeDescriptions[leaveType]}
+                    </p>
+                  )}
                 </div>
-
-                {leaveType && (
-                  <p className="text-xs text-muted-foreground">
-                    {leaveTypeDescriptions[leaveType]}
-                  </p>
-                )}
 
                 {/* Other Leave Type Specification */}
                 {leaveType === 'other' && (
