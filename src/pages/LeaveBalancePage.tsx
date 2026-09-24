@@ -13,6 +13,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000
 
 // Same live-balance fetch used on the Dashboard — pulls the lifetime
 // "Total Leave Credits" number that isn't part of the LeaveContext balance shape.
+// It's no longer displayed as its own card, but Available is computed from it.
 function useLifetimeCredits(employeeId: string | undefined) {
   const [totalLeaveCredits, setTotalLeaveCredits] = useState<number | null>(null);
 
@@ -39,8 +40,8 @@ export default function LeaveBalancePage() {
   const { user } = useAuth();
   const { getEmployeeLeaveBalance, refreshBalance } = useLeave();
 
-  // ✅ FIX: Balance was only ever fetched once at login (in LeaveContext's mount effect),
-  // so it went stale after approvals happened elsewhere. Refresh every time this page mounts.
+  // Refresh the balance every time this page mounts so it never goes stale
+  // after approvals happen elsewhere.
   useEffect(() => {
     if (user?.employeeId) {
       refreshBalance(user.employeeId);
@@ -54,7 +55,7 @@ export default function LeaveBalancePage() {
   const sl  = balance?.sickLeave        ?? 0;
   const spl = balance?.specialPrivilege ?? 0;
   const fl  = balance?.forcedLeave      ?? 0;
-  const totalUsed = balance?.totalUsed  ?? 0;
+  const totalAvailed = balance?.totalUsed ?? 0;
 
   const leaveTypes = [
     { name: 'Vacation Leave',          sub: 'Earns 1.25 days/month', value: vl,  max: 60 },
@@ -65,10 +66,8 @@ export default function LeaveBalancePage() {
 
   const hasOverCap = leaveTypes.some(l => l.value > l.max);
 
-  // Available is now derived from Total Leave Credits (the one official lifetime
-  // number) instead of a separate "Total Earned" figure — having two similar-but-
-  // different totals on screen was confusing people.
-  const available = (totalLeaveCredits ?? 0) - totalUsed;
+  // Available = Total Leave Credits − Total Availed
+  const available = (totalLeaveCredits ?? 0) - totalAvailed;
 
   return (
     <DashboardLayout>
@@ -77,17 +76,11 @@ export default function LeaveBalancePage() {
         description="Track your leave credits and accrual rates"
       />
 
-      {/* ── Summary Cards — 3 cards, one meaning each ── */}
-      <div className="grid gap-4 md:grid-cols-3 mb-6">
+      {/* ── Summary Cards — Total Availed + Available ── */}
+      <div className="grid gap-4 md:grid-cols-2 mb-6">
         <StatCard
-          title="Total Leave Credits"
-          value={totalLeaveCredits !== null ? totalLeaveCredits.toFixed(2) : '—'}
-          description="lifetime earned"
-          variant="primary"
-        />
-        <StatCard
-          title="Total Used"
-          value={totalUsed.toFixed(2)}
+          title="Total Availed"
+          value={totalAvailed.toFixed(2)}
           description="days"
           variant="primary"
         />
@@ -118,12 +111,12 @@ export default function LeaveBalancePage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {/* Legend */}
+          {/* Legend — bars show the current available balance per type */}
           <div className="flex gap-5 mb-6">
             {[
-              { color: PRIMARY,   label: 'Used'      },
+              { color: PRIMARY,   label: 'Available' },
               { color: OVER_CAP,  label: 'Over cap'  },
-              { color: '#E5E7EB', label: 'Remaining' },
+              { color: '#E5E7EB', label: 'Room left' },
             ].map((item) => (
               <div key={item.label} className="flex items-center gap-1.5">
                 <div style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: item.color }} />
