@@ -105,10 +105,10 @@ export default function EmployeesPage() {
     }
   };
 
+  // Employee ID is confidential, so it is intentionally NOT searchable
   const filteredEmployees = employees.filter((emp) => {
     const matchesSearch =
       emp.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      emp.employee_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
       emp.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       emp.department.toLowerCase().includes(searchTerm.toLowerCase());
     
@@ -180,7 +180,7 @@ export default function EmployeesPage() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Search by name, ID, email..."
+                  placeholder="Search by name, email..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-9 w-[250px]"
@@ -223,7 +223,6 @@ export default function EmployeesPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Employee ID</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Department</TableHead>
                   <TableHead>Position</TableHead>
@@ -236,14 +235,13 @@ export default function EmployeesPage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                       Loading employees...
                     </TableCell>
                   </TableRow>
                 ) : filteredEmployees.length > 0 ? (
                   filteredEmployees.map((emp) => (
                     <TableRow key={emp.id} className="table-row-hover">
-                      <TableCell className="font-mono text-sm">{emp.employee_id}</TableCell>
                       <TableCell>
                         <div>
                           <p className="font-medium">{emp.full_name}</p>
@@ -274,7 +272,7 @@ export default function EmployeesPage() {
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                       No employees found matching your criteria
                     </TableCell>
                   </TableRow>
@@ -292,8 +290,9 @@ export default function EmployeesPage() {
             <>
               <DialogHeader>
                 <DialogTitle className="text-xl">{selectedEmployee.full_name}</DialogTitle>
-                <DialogDescription className="font-mono text-xs">
-                  {selectedEmployee.employee_id}
+                {/* Employee ID removed (confidential). Kept for screen readers only. */}
+                <DialogDescription className="sr-only">
+                  Employee details
                 </DialogDescription>
               </DialogHeader>
 
