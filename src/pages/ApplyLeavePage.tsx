@@ -68,8 +68,10 @@ const leaveTypeDurationLabels: Partial<Record<LeaveType, string>> = {
 interface LeaveDateRule {
   /** Must be filed at least this many days before the start date. */
   minAdvanceDays?: number;
-  /** Max inclusive calendar-day span allowed (end - start + 1). */
+  /** Max days allowed. Counted in calendar days (end - start + 1) unless maxInWorkingDays is true. */
   maxDurationDays?: number;
+  /** If true, maxDurationDays counts working days only (Sundays, and Saturdays for staff, are not counted). */
+  maxInWorkingDays?: boolean;
   /** If true, start/end dates may fall in the past (filed upon/after return). */
   allowRetroactive?: boolean;
   /** Short helper text shown under Inclusive Dates for this leave type. */
@@ -94,11 +96,13 @@ const leaveDateRules: Partial<Record<LeaveType, LeaveDateRule>> = {
   special_privilege: {
     minAdvanceDays: 7,
     maxDurationDays: 3,
+    maxInWorkingDays: true,
     allowRetroactive: false,
-    note: 'File at least 1 week before availment. Maximum of 3 days.',
+    note: 'File at least 1 week before availment. Maximum of 3 working days.',
   },
   forced: {
     maxDurationDays: 5,
+    maxInWorkingDays: true,
     allowRetroactive: false,
     note: 'Mandatory 5-day annual vacation leave, scheduled within the year.',
   },
@@ -109,14 +113,16 @@ const leaveDateRules: Partial<Record<LeaveType, LeaveDateRule>> = {
   },
   paternity: {
     maxDurationDays: 7,
+    maxInWorkingDays: true,
     allowRetroactive: false,
-    note: 'Up to 7 days. Requires proof of child\u2019s delivery (birth certificate, medical certificate, marriage contract).',
+    note: 'Up to 7 working days. Requires proof of child\u2019s delivery (birth certificate, medical certificate, marriage contract).',
   },
   solo_parent: {
     minAdvanceDays: 5,
     maxDurationDays: 7,
+    maxInWorkingDays: true,
     allowRetroactive: false,
-    note: 'File at least 5 days in advance, with updated Solo Parent ID. Up to 7 days.',
+    note: 'File at least 5 days in advance, with updated Solo Parent ID. Up to 7 working days.',
   },
   study: {
     maxDurationDays: 180,
@@ -125,8 +131,9 @@ const leaveDateRules: Partial<Record<LeaveType, LeaveDateRule>> = {
   },
   vawc: {
     maxDurationDays: 10,
+    maxInWorkingDays: true,
     allowRetroactive: true,
-    note: 'Up to 10 days. May be filed in advance or immediately upon your return.',
+    note: 'Up to 10 working days. May be filed in advance or immediately upon your return.',
   },
   rehabilitation: {
     maxDurationDays: 180,
@@ -135,11 +142,13 @@ const leaveDateRules: Partial<Record<LeaveType, LeaveDateRule>> = {
   },
   special_emergency: {
     maxDurationDays: 5,
+    maxInWorkingDays: true,
     allowRetroactive: false,
     note: 'Up to 5 working days (straight or staggered) within 30 days of the calamity.',
   },
   calamity: {
     maxDurationDays: 5,
+    maxInWorkingDays: true,
     allowRetroactive: false,
     note: 'Up to 5 working days (straight or staggered) within 30 days of the calamity.',
   },
@@ -175,6 +184,17 @@ function addDaysToDateString(dateStr: string, days: number): string {
   const [year, month, day] = dateStr.split('-').map(Number);
   const d = new Date(year, month - 1, day);
   d.setDate(d.getDate() + days);
+  return toDateString(d);
+}
+
+/** Returns the date (yyyy-mm-dd) of the Nth working day, counting `startStr` as day 1. */
+function nthWorkingDayFrom(startStr: string, n: number, isFaculty: boolean): string {
+  const d = parseLocalDate(startStr);
+  let count = isWorkingDay(d, isFaculty) ? 1 : 0;
+  while (count < n) {
+    d.setDate(d.getDate() + 1);
+    if (isWorkingDay(d, isFaculty)) count++;
+  }
   return toDateString(d);
 }
 
@@ -268,6 +288,9 @@ export default function ApplyLeavePage() {
 
   const dateRule = leaveType ? (leaveDateRules[leaveType] ?? defaultRule) : defaultRule;
 
+  // Days counted against this leave type's max duration (working days or calendar days).
+  const countedDays = dateRule.maxInWorkingDays ? numberOfDays : calendarDays;
+
   // FIXED: built from local calendar fields (no UTC round-trip), so it can't
   // drift a day depending on timezone/time-of-day.
   const todayStr = toDateString(new Date());
@@ -283,9 +306,13 @@ export default function ApplyLeavePage() {
 
   // End date can't be before start date; if a max duration applies, cap it too.
   const minEndDate = startDate || minStartDate;
-  const maxEndDate = dateRule.maxDurationDays && startDate
-    ? addDaysToDateString(startDate, dateRule.maxDurationDays - 1)
-    : undefined;
+  const getMaxEndDate = (start: string): string | undefined => {
+    if (!dateRule.maxDurationDays || !start) return undefined;
+    return dateRule.maxInWorkingDays
+      ? nthWorkingDayFrom(start, dateRule.maxDurationDays, isFaculty)
+      : addDaysToDateString(start, dateRule.maxDurationDays - 1);
+  };
+  const maxEndDate = getMaxEndDate(startDate);
 
   // Which calendar days are greyed out / unclickable.
   const isStartDateDisabled = (date: Date): boolean => {
@@ -307,9 +334,7 @@ export default function ApplyLeavePage() {
   const handleStartDateChange = (value: string) => {
     setStartDate(value);
     if (endDate) {
-      const newMaxEnd = dateRule.maxDurationDays
-        ? addDaysToDateString(value, dateRule.maxDurationDays - 1)
-        : undefined;
+      const newMaxEnd = getMaxEndDate(value);
       if (endDate < value || (newMaxEnd && endDate > newMaxEnd)) {
         setEndDate('');
       }
@@ -411,9 +436,9 @@ export default function ApplyLeavePage() {
     }
 
     // CSC max-duration check
-    if (dateRule.maxDurationDays && calendarDays > dateRule.maxDurationDays) {
+    if (dateRule.maxDurationDays && countedDays > dateRule.maxDurationDays) {
       toast.error('Duration exceeds the allowed limit', {
-        description: `${leaveTypeLabels[leaveType]} is limited to ${dateRule.maxDurationDays} day(s). You selected ${calendarDays} day(s).`,
+        description: `${leaveTypeLabels[leaveType]} is limited to ${dateRule.maxDurationDays} ${dateRule.maxInWorkingDays ? 'working ' : ''}day(s). You selected ${countedDays}.`,
       });
       return;
     }
@@ -698,7 +723,7 @@ export default function ApplyLeavePage() {
                       )}
                       {dateRule.maxDurationDays && (
                         <span className="ml-2 text-xs font-normal text-muted-foreground">
-                          ({calendarDays}/{dateRule.maxDurationDays} calendar days used)
+                          ({countedDays}/{dateRule.maxDurationDays} {dateRule.maxInWorkingDays ? 'working' : 'calendar'} days used)
                         </span>
                       )}
                     </p>
