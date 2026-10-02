@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLeave, LeaveStatus } from '@/contexts/LeaveContext';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -10,11 +10,25 @@ import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
 import { getLeaveTypeLabel, formatDate } from '@/lib/leave-utils';
 import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from 'recharts';
+import {
   FileText, CheckCircle,
   ArrowRight,
 } from 'lucide-react';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+
+// Maroon used for the HR dashboard chart + compact stat cards
+const MAROON = '#7b1325';
+
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 interface MonetizationRequest {
   id: number;
@@ -160,8 +174,39 @@ function EmployeeDashboard({ employeeId }: { employeeId: string }) {
   );
 }
 
+// Compact stat card used only on the HR dashboard
+function CompactStat({
+  title,
+  value,
+  description,
+}: {
+  title: string;
+  value: number | string;
+  description: string;
+}) {
+  return (
+    <Card className="border-l-4" style={{ borderLeftColor: MAROON }}>
+      <CardContent className="p-3">
+        <p className="text-xs text-muted-foreground">{title}</p>
+        <div className="flex items-baseline gap-2">
+          <span className="text-xl font-bold leading-tight" style={{ color: MAROON }}>
+            {value}
+          </span>
+          <span className="text-xs text-muted-foreground">{description}</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function HRDashboard() {
-  const { getPendingRequests, allRequests, refreshRequests, refreshAllRequests, isLoading } = useLeave();
+  const {
+    getPendingRequests,
+    allRequests,
+    refreshRequests,
+    refreshAllRequests,
+    isLoadingAll,
+  } = useLeave();
 
   useEffect(() => {
     refreshRequests();
@@ -169,7 +214,6 @@ function HRDashboard() {
   }, [refreshRequests, refreshAllRequests]);
 
   const pendingRequests = getPendingRequests('hr') || [];
-  const recentPending    = pendingRequests.slice(0, 5);
 
   const now = new Date();
   const approvedThisMonth = allRequests.filter((r) => {
@@ -177,6 +221,26 @@ function HRDashboard() {
     const updated = r.updatedAt ? new Date(r.updatedAt) : new Date(r.createdAt);
     return updated.getFullYear() === now.getFullYear() && updated.getMonth() === now.getMonth();
   }).length;
+
+  // Bar chart data: number of leave requests filed per month (current year)
+  const monthlyData = useMemo(() => {
+    const year = new Date().getFullYear();
+    const counts: number[] = Array(12).fill(0);
+    allRequests.forEach((r) => {
+      const d = new Date(r.createdAt);
+      if (d.getFullYear() === year) counts[d.getMonth()] += 1;
+    });
+    return MONTH_LABELS.map((month, i) => ({ month, requests: counts[i] }));
+  }, [allRequests]);
+
+  // Table data: latest 5 requests (any status)
+  const recentRequests = useMemo(
+    () =>
+      [...allRequests]
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 5),
+    [allRequests]
+  );
 
   return (
     <>
@@ -188,47 +252,86 @@ function HRDashboard() {
         </Button>
       </PageHeader>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <StatCard title="Pending Requests"    value={pendingRequests.length} description="awaiting HR review"  variant="primary" />
-        <StatCard title="Total Employees"     value={200}                    description="faculty and staff"   variant="primary" />
-        <StatCard title="Approved This Month" value={approvedThisMonth}      description="leave requests"      variant="primary" />
+      {/* Compact stat cards */}
+      <div className="grid gap-3 md:grid-cols-3">
+        <CompactStat title="Pending Requests"    value={pendingRequests.length} description="awaiting HR review" />
+        <CompactStat title="Total Employees"     value={200}                    description="faculty and staff" />
+        <CompactStat title="Approved This Month" value={approvedThisMonth}      description="leave requests" />
       </div>
 
-      <div className="mt-6">
+      {/* Graph: Monthly Leave Requests */}
+      <div className="mt-4">
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Monthly Leave Requests</CardTitle>
+            <CardDescription>Number of leave requests filed per month, {now.getFullYear()}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[220px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthlyData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                  <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={12} />
+                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                  <Tooltip
+                    cursor={{ fill: 'rgba(123, 19, 37, 0.08)' }}
+                    formatter={(value: number) => [value, 'Requests']}
+                  />
+                  <Bar dataKey="requests" fill={MAROON} radius={[4, 4, 0, 0]} maxBarSize={32} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Table: Recent Leave Requests */}
+      <div className="mt-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
             <div>
-              <CardTitle className="text-lg">Pending Leave Requests</CardTitle>
-              <CardDescription>Requests awaiting your review and validation</CardDescription>
+              <CardTitle className="text-lg">Recent Leave Requests</CardTitle>
+              <CardDescription>Latest leave activity from all employees</CardDescription>
             </div>
             <Button variant="outline" size="sm" asChild>
-              <Link to="/pending-requests">View All</Link>
+              <Link to="/all-requests">View All</Link>
             </Button>
           </CardHeader>
           <CardContent>
-            {isLoading ? (
+            {isLoadingAll ? (
               <p className="text-center text-muted-foreground py-8">Loading...</p>
-            ) : recentPending.length > 0 ? (
-              <div className="space-y-3">
-                {recentPending.map((request) => (
-                  <div key={request.id} className="flex items-center justify-between rounded-lg border p-4">
-                    <div>
-                      <p className="font-medium">{request.employeeName}</p>
-                      <p className="text-sm text-muted-foreground">{request.department}</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="font-medium">{getLeaveTypeLabel(request.leaveType)}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {formatDate(request.startDate)} - {formatDate(request.endDate)}
-                      </p>
-                    </div>
-                    <StatusBadge status={request.status} />
-                  </div>
-                ))}
+            ) : recentRequests.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs text-muted-foreground">
+                      <th className="py-2 pr-4 font-medium">Employee</th>
+                      <th className="py-2 pr-4 font-medium">Department</th>
+                      <th className="py-2 pr-4 font-medium">Leave Type</th>
+                      <th className="py-2 pr-4 font-medium">Dates</th>
+                      <th className="py-2 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentRequests.map((request) => (
+                      <tr key={request.id} className="border-b last:border-0">
+                        <td className="py-3 pr-4 font-medium">{request.employeeName}</td>
+                        <td className="py-3 pr-4 text-muted-foreground">{request.department}</td>
+                        <td className="py-3 pr-4">{getLeaveTypeLabel(request.leaveType)}</td>
+                        <td className="py-3 pr-4 text-muted-foreground whitespace-nowrap">
+                          {formatDate(request.startDate)} - {formatDate(request.endDate)}
+                        </td>
+                        <td className="py-3">
+                          <StatusBadge status={request.status} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             ) : (
               <div className="text-center py-8 text-muted-foreground">
-                <p>No pending requests at this time</p>
+                <p>No leave requests yet</p>
               </div>
             )}
           </CardContent>
