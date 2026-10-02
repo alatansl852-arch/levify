@@ -60,19 +60,47 @@ export function formatDateTime(dateString: string): string {
   });
 }
 
-export function calculateWorkingDays(startDate: string, endDate: string): number {
-  const start = new Date(startDate);
-  const end = new Date(endDate);
+/**
+ * Parses a yyyy-mm-dd string as a LOCAL date (no UTC shift).
+ * Falls back to the normal Date parser for any other format (e.g. ISO strings with time).
+ */
+export function parseLocalDate(dateString: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateString);
+  if (match) {
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  }
+  return new Date(dateString);
+}
+
+/**
+ * Working-day rule:
+ * - Sunday is never a working day.
+ * - Saturday counts only for faculty (they have Friday/Saturday classes).
+ * - Monday to Friday always count.
+ */
+export function isWorkingDay(date: Date, isFaculty = false): boolean {
+  const day = date.getDay();
+  if (day === 0) return false;
+  if (day === 6) return isFaculty;
+  return true;
+}
+
+export function calculateWorkingDays(
+  startDate: string,
+  endDate: string,
+  isFaculty = false
+): number {
+  const start = parseLocalDate(startDate);
+  const end = parseLocalDate(endDate);
   let count = 0;
   const current = new Date(start);
-  
+
   while (current <= end) {
-    const dayOfWeek = current.getDay();
-    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+    if (isWorkingDay(current, isFaculty)) {
       count++;
     }
     current.setDate(current.getDate() + 1);
   }
-  
+
   return count;
 }

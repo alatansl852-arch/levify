@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { format } from 'date-fns';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLeave, LeaveType } from '@/contexts/LeaveContext';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -12,9 +13,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { leaveTypeLabels, leaveTypeDescriptions, calculateWorkingDays } from '@/lib/leave-utils';
-import { FileText, Calendar, AlertCircle, X } from 'lucide-react';
+import {
+  leaveTypeLabels,
+  leaveTypeDescriptions,
+  calculateWorkingDays,
+  isWorkingDay,
+  parseLocalDate,
+} from '@/lib/leave-utils';
+import { FileText, Calendar as CalendarIcon, AlertCircle, X } from 'lucide-react';
 
 const leaveCategories = {
   regular: ['vacation', 'sick', 'special_privilege', 'forced'] as LeaveType[],
@@ -51,8 +61,9 @@ const leaveTypeDurationLabels: Partial<Record<LeaveType, string>> = {
 // ---------------------------------------------------------------------------
 // CSC Omnibus Rules on Leave — per-leave-type date constraints.
 // Source: "Instructions and Requirements" (agency leave form, sections 1-15).
-// Each rule drives the min/max on the Inclusive Dates inputs and the
-// submit-time validation below. Types not listed fall back to `defaultRule`.
+// Each rule drives which dates are selectable in the Inclusive Dates pickers
+// and the submit-time validation below. Types not listed fall back to
+// `defaultRule`.
 // ---------------------------------------------------------------------------
 interface LeaveDateRule {
   /** Must be filed at least this many days before the start date. */
@@ -167,10 +178,66 @@ function addDaysToDateString(dateStr: string, days: number): string {
   return toDateString(d);
 }
 
+// ---------------------------------------------------------------------------
+// Date picker (shadcn Calendar in a Popover). Unselectable dates (past dates,
+// Sundays, non-working Saturdays, out-of-range dates) are greyed out and
+// can't be clicked, which the native <input type="date"> can't do.
+// ---------------------------------------------------------------------------
+interface DatePickerFieldProps {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  isDateDisabled: (date: Date) => boolean;
+  defaultMonth?: Date;
+}
+
+function DatePickerField({ id, value, onChange, isDateDisabled, defaultMonth }: DatePickerFieldProps) {
+  const [open, setOpen] = useState(false);
+  const selected = value ? parseLocalDate(value) : undefined;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          id={id}
+          type="button"
+          variant="outline"
+          className={cn(
+            'w-full justify-start text-left font-normal',
+            !value && 'text-muted-foreground'
+          )}
+        >
+          <CalendarIcon className="mr-2 h-4 w-4" />
+          {selected ? format(selected, 'MMM d, yyyy') : 'Pick a date'}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start">
+        <Calendar
+          mode="single"
+          selected={selected}
+          defaultMonth={selected ?? defaultMonth}
+          onSelect={(date) => {
+            if (date) {
+              onChange(toDateString(date));
+              setOpen(false);
+            }
+          }}
+          disabled={isDateDisabled}
+          initialFocus
+          className="p-3 pointer-events-auto"
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export default function ApplyLeavePage() {
   const { user } = useAuth();
   const { addLeaveRequest, getEmployeeLeaveBalance } = useLeave();
   const navigate = useNavigate();
+
+  // Faculty have Friday/Saturday classes, so Saturday counts as a working day for them.
+  const isFaculty = user?.role === 'faculty';
 
   // Leave type starts unselected so Inclusive Dates (and other type-specific
   // sections) only appear once the user has actually made a choice.
@@ -189,7 +256,7 @@ export default function ApplyLeavePage() {
 
   // FIXED: Use employeeId instead of id — balances are keyed by employeeId
   const balance = user ? getEmployeeLeaveBalance(user.employeeId) : undefined;
-  const numberOfDays = startDate && endDate ? calculateWorkingDays(startDate, endDate) : 0;
+  const numberOfDays = startDate && endDate ? calculateWorkingDays(startDate, endDate, isFaculty) : 0;
   const isWeekendOnlyRange = !!startDate && !!endDate && numberOfDays === 0;
 
   // Inclusive calendar-day span (end - start + 1), used against maxDurationDays
@@ -206,6 +273,8 @@ export default function ApplyLeavePage() {
   const todayStr = toDateString(new Date());
 
   // Earliest selectable start date for this leave type.
+  // Today is allowed; yesterday and earlier are blocked (unless the leave type
+  // is filed upon/after return, e.g. Sick Leave).
   const minStartDate = dateRule.allowRetroactive
     ? undefined
     : dateRule.minAdvanceDays
@@ -217,6 +286,35 @@ export default function ApplyLeavePage() {
   const maxEndDate = dateRule.maxDurationDays && startDate
     ? addDaysToDateString(startDate, dateRule.maxDurationDays - 1)
     : undefined;
+
+  // Which calendar days are greyed out / unclickable.
+  const isStartDateDisabled = (date: Date): boolean => {
+    if (!isWorkingDay(date, isFaculty)) return true;
+    const s = toDateString(date);
+    if (minStartDate && s < minStartDate) return true;
+    return false;
+  };
+
+  const isEndDateDisabled = (date: Date): boolean => {
+    if (!isWorkingDay(date, isFaculty)) return true;
+    const s = toDateString(date);
+    if (minEndDate && s < minEndDate) return true;
+    if (maxEndDate && s > maxEndDate) return true;
+    return false;
+  };
+
+  // When the start date changes, drop the end date if it no longer fits.
+  const handleStartDateChange = (value: string) => {
+    setStartDate(value);
+    if (endDate) {
+      const newMaxEnd = dateRule.maxDurationDays
+        ? addDaysToDateString(value, dateRule.maxDurationDays - 1)
+        : undefined;
+      if (endDate < value || (newMaxEnd && endDate > newMaxEnd)) {
+        setEndDate('');
+      }
+    }
+  };
 
   // Clear the picked dates whenever the leave type changes so a stale
   // selection from a previous type (e.g. a 90-day range picked under
@@ -285,9 +383,19 @@ export default function ApplyLeavePage() {
       return;
     }
 
+    // Start and end dates must fall on a working day (no Sundays; no Saturdays for non-faculty)
+    if (!isWorkingDay(parseLocalDate(startDate), isFaculty) || !isWorkingDay(parseLocalDate(endDate), isFaculty)) {
+      toast.error('Invalid date selected', {
+        description: isFaculty
+          ? 'Sundays are non-working days. Please choose a different date.'
+          : 'Saturdays and Sundays are non-working days. Please choose a different date.',
+      });
+      return;
+    }
+
     if (numberOfDays === 0) {
       toast.error('Selected dates contain no working days', {
-        description: 'Please choose a date range that includes at least one weekday.',
+        description: 'Please choose a date range that includes at least one working day.',
       });
       return;
     }
@@ -530,7 +638,7 @@ export default function ApplyLeavePage() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
-                    <Calendar className="h-5 w-5" />
+                    <CalendarIcon className="h-5 w-5" />
                     Inclusive Dates
                   </CardTitle>
                   <CardDescription>
@@ -541,25 +649,28 @@ export default function ApplyLeavePage() {
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="start_date">Start Date</Label>
-                      <Input
+                      <DatePickerField
                         id="start_date"
-                        type="date"
                         value={startDate}
-                        min={minStartDate}
-                        onChange={(e) => setStartDate(e.target.value)}
-                        required
+                        onChange={handleStartDateChange}
+                        isDateDisabled={isStartDateDisabled}
+                        defaultMonth={minStartDate ? parseLocalDate(minStartDate) : undefined}
                       />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="end_date">End Date</Label>
-                      <Input
+                      <DatePickerField
                         id="end_date"
-                        type="date"
                         value={endDate}
-                        min={minEndDate}
-                        max={maxEndDate}
-                        onChange={(e) => setEndDate(e.target.value)}
-                        required
+                        onChange={setEndDate}
+                        isDateDisabled={isEndDateDisabled}
+                        defaultMonth={
+                          startDate
+                            ? parseLocalDate(startDate)
+                            : minStartDate
+                              ? parseLocalDate(minStartDate)
+                              : undefined
+                        }
                       />
                     </div>
                   </div>
@@ -571,12 +682,18 @@ export default function ApplyLeavePage() {
                     </p>
                   )}
 
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {isFaculty
+                      ? 'Sundays are non-working days and cannot be selected.'
+                      : 'Saturdays and Sundays are non-working days and cannot be selected.'}
+                  </p>
+
                   {startDate && endDate && (
                     <p className="mt-3 text-sm font-medium">
                       Number of Working Days: <span className="text-primary">{numberOfDays}</span>
                       {isWeekendOnlyRange && (
                         <span className="ml-2 text-xs font-normal text-destructive">
-                          (selected dates fall on a weekend — no working days in this range)
+                          (selected dates fall on non-working days — no working days in this range)
                         </span>
                       )}
                       {dateRule.maxDurationDays && (
@@ -762,7 +879,7 @@ export default function ApplyLeavePage() {
                     <span className="font-medium">
                       {numberOfDays} day(s)
                       {isWeekendOnlyRange && (
-                        <span className="ml-1 text-xs text-destructive">(weekend only)</span>
+                        <span className="ml-1 text-xs text-destructive">(non-working days only)</span>
                       )}
                     </span>
                   </div>
