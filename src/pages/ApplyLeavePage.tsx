@@ -198,6 +198,11 @@ function nthWorkingDayFrom(startStr: string, n: number, isFaculty: boolean): str
   return toDateString(d);
 }
 
+/** Formats a number as pesos with two decimals, e.g. 719.23 -> "₱719.23". */
+function formatPeso(amount: number): string {
+  return `₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 // ---------------------------------------------------------------------------
 // Date picker (shadcn Calendar in a Popover). Unselectable dates (past dates,
 // Sundays, non-working Saturdays, out-of-range dates) are greyed out and
@@ -349,11 +354,28 @@ export default function ApplyLeavePage() {
     setEndDate('');
   }, [leaveType]);
 
-  // Calculate monetization amount (example: based on daily rate)
-  const dailyRate = 500; // This should come from user's actual salary data
+  // ---------------------------------------------------------------------------
+  // Monetization estimate — CSC formula: monthly salary ÷ 22 = daily rate.
+  // This now mirrors what HR sees in the review modal. The monthly salary is
+  // read from the logged-in user. If your AuthContext user object uses a
+  // different field name, change it here (see the two lookups below).
+  // If no salary is available yet, it falls back to the old flat ₱500 so the
+  // page still works.
+  // ---------------------------------------------------------------------------
+  const salaryUser = user as
+    | (typeof user & { monthlySalary?: number; monthly_salary?: number })
+    | null
+    | undefined;
+  const monthlySalary = Number(salaryUser?.monthlySalary ?? salaryUser?.monthly_salary ?? 0);
+  const hasSalaryData = monthlySalary > 0;
+  const dailyRate = hasSalaryData
+    ? Math.round((monthlySalary / 22) * 100) / 100
+    : 500;
+
+  const parsedMonetizationDays = parseFloat(monetizationDays);
   const calculateMonetizationAmount = () => {
-    if (!monetizationRequested || !monetizationDays) return 0;
-    return parseInt(monetizationDays) * dailyRate;
+    if (!monetizationRequested || !monetizationDays || isNaN(parsedMonetizationDays)) return 0;
+    return Math.round(parsedMonetizationDays * dailyRate * 100) / 100;
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -448,6 +470,21 @@ export default function ApplyLeavePage() {
       return;
     }
 
+    // NEW: validate the monetization day count itself
+    if (monetizationRequested) {
+      if (isNaN(parsedMonetizationDays) || parsedMonetizationDays <= 0) {
+        toast.error('Days to monetize must be greater than 0');
+        return;
+      }
+      const maxMonetizable = balance?.vacationLeave ?? 0;
+      if (parsedMonetizationDays > maxMonetizable) {
+        toast.error('Not enough vacation leave credits', {
+          description: `You can monetize at most ${maxMonetizable.toFixed(2)} vacation leave day(s).`,
+        });
+        return;
+      }
+    }
+
     if (leaveType === 'other' && !otherLeaveType.trim()) {
       toast.error('Please specify the leave type');
       return;
@@ -474,6 +511,9 @@ export default function ApplyLeavePage() {
       formData.append('days_count', numberOfDays.toString());
       formData.append('reason', reason);
       formData.append('monetize_credits', monetizationRequested ? '1' : '0');
+      // FIXED: the number of days to monetize was never sent before, so the
+      // backend/HR modal fell back to days_count (the leave duration).
+      formData.append('monetization_days', monetizationRequested ? String(parsedMonetizationDays) : '0');
       formData.append('commutation_requested', commutation === 'requested' ? '1' : '0');
 
       // Add hospital details if sick leave
@@ -795,8 +835,8 @@ export default function ApplyLeavePage() {
                       {monetizationDays && (
                         <div className="mt-3 p-4 bg-primary/10 rounded-lg space-y-2">
                           <div className="flex justify-between items-center">
-                            <span className="text-sm text-muted-foreground">Daily Rate:</span>
-                            <span className="text-sm font-medium">₱{dailyRate.toLocaleString()}</span>
+                            <span className="text-sm text-muted-foreground">Daily Rate{hasSalaryData ? ' (salary ÷ 22)' : ''}:</span>
+                            <span className="text-sm font-medium">{formatPeso(dailyRate)}</span>
                           </div>
                           <div className="flex justify-between items-center">
                             <span className="text-sm text-muted-foreground">Days:</span>
@@ -805,11 +845,11 @@ export default function ApplyLeavePage() {
                           <div className="border-t pt-2 flex justify-between items-center">
                             <span className="text-sm font-semibold">Estimated Amount:</span>
                             <span className="text-lg font-bold text-primary">
-                              ₱{calculateMonetizationAmount().toLocaleString()}
+                              {formatPeso(calculateMonetizationAmount())}
                             </span>
                           </div>
                           <p className="text-xs text-muted-foreground mt-2">
-                            Calculation: {monetizationDays} days × ₱{dailyRate.toLocaleString()} = ₱{calculateMonetizationAmount().toLocaleString()}
+                            Calculation: {monetizationDays} days × {formatPeso(dailyRate)} = {formatPeso(calculateMonetizationAmount())}
                           </p>
                           <p className="text-xs text-muted-foreground">
                             *Subject to final computation and fund availability
@@ -930,7 +970,7 @@ export default function ApplyLeavePage() {
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">Est. Amount:</span>
                         <span className="font-medium text-primary">
-                          ₱{calculateMonetizationAmount().toLocaleString()}
+                          {formatPeso(calculateMonetizationAmount())}
                         </span>
                       </div>
                     </>
