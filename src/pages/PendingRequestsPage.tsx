@@ -37,6 +37,7 @@ import { Clock, CheckCircle, XCircle, Eye, FileText, Paperclip, Loader2, Printer
 import { toast } from 'sonner';
 import heic2any from 'heic2any';
 import PrintableLeaveForm from '@/components/PrintableLeaveForm';
+import { getMonthlySalary, getDailyRate, computeCashValue } from '@/lib/salary-utils';
 
 interface Attachment {
   id: number;
@@ -67,6 +68,9 @@ interface LeaveApplication {
   // Monetization-specific fields (present only on monetization requests)
   monetize_credits?: boolean;
   commutation_requested?: boolean;
+  // Number of vacation credits the employee wants converted to cash.
+  // Postgres NUMERIC comes back as a string, and it is null on older rows.
+  monetization_days?: number | string | null;
   salary_grade?: number;
 }
 
@@ -76,21 +80,19 @@ interface CombinedApplication extends LeaveApplication {
   kind: RequestKind;
 }
 
-// Philippine Government Salary Grade Monthly Rates (SSL V / 2024)
-const SALARY_GRADE_TABLE: Record<number, number> = {
-  1:  13000,  2:  13519,  3:  14060,  4:  14623,  5:  15211,
-  6:  15823,  7:  16461,  8:  17126,  9:  17819,  10: 18549,
-  11: 19316,  12: 20124,  13: 20972,  14: 21863,  15: 22799,
-  16: 23781,  17: 24812,  18: 25895,  19: 27000,  20: 28000,
-  21: 29165,  22: 30531,  23: 33584,  24: 36942,  25: 40637,
-  26: 44700,  27: 49171,  28: 54083,  29: 59492,  30: 65441,
-  31: 72000,  32: 79200,  33: 87120,
+/**
+ * Days that are actually being monetized.
+ * Newer applications store this in monetization_days. Older ones were saved
+ * before that column existed, so we fall back to days_count for them.
+ */
+const getMonetizedDays = (app: LeaveApplication): number => {
+  const md = Number(app.monetization_days);
+  return md > 0 ? md : Number(app.days_count) || 0;
 };
 
-const computeCashValue = (salaryGrade: number, days: number): number => {
-  const monthlySalary = SALARY_GRADE_TABLE[salaryGrade] || 0;
-  const dailyRate = monthlySalary / 22; // 22 working days per month
-  return dailyRate * days;
+/** True when the application carries its own monetization_days (leave + monetization filed together). */
+const hasOwnMonetizationDays = (app: LeaveApplication): boolean => {
+  return Number(app.monetization_days) > 0;
 };
 
 const formatCurrency = (amount: number): string => {
@@ -476,10 +478,15 @@ export default function PendingRequestsPage() {
                       </TableCell>
                       <TableCell>{app.leave_type}</TableCell>
                       <TableCell>
-                        {app.kind === 'regular' ? (
+                        {app.kind === 'regular' || hasOwnMonetizationDays(app) ? (
                           <div className="text-sm">
                             <p>{formatDate(app.start_date)}</p>
                             <p className="text-muted-foreground">to {formatDate(app.end_date)}</p>
+                            {app.kind === 'monetization' && hasOwnMonetizationDays(app) && (
+                              <p className="text-xs text-primary mt-1">
+                                Monetize: {getMonetizedDays(app)} day(s)
+                              </p>
+                            )}
                           </div>
                         ) : (
                           <p className="text-sm font-medium">{app.days_count} days</p>
@@ -549,10 +556,17 @@ export default function PendingRequestsPage() {
 
           {viewRequest && (() => {
             const isMonetization = viewRequest.kind === 'monetization';
+            // Leave + monetization filed together (has its own monetization_days).
+            // Older monetization-only rows fall back to days_count.
+            const isCombined = isMonetization && hasOwnMonetizationDays(viewRequest);
+            const showLeaveDetails = !isMonetization || isCombined;
             const sg = viewRequest.salary_grade || 0;
-            const monthlySalary = SALARY_GRADE_TABLE[sg] || 0;
-            const dailyRate = monthlySalary / 22;
-            const cashValue = dailyRate * viewRequest.days_count;
+            const monthlySalary = getMonthlySalary(sg);
+            const dailyRate = getDailyRate(sg);
+            const monetizedDays = getMonetizedDays(viewRequest);
+            const cashValue = computeCashValue(sg, monetizedDays);
+            // Monetization converts VACATION credits when the leave itself is a different type.
+            const creditLabel = isCombined ? 'vacation leave credits' : viewRequest.leave_type;
 
             return (
               <div className="space-y-4">
@@ -584,21 +598,7 @@ export default function PendingRequestsPage() {
                     <p className="font-medium">{viewRequest.leave_type}</p>
                   </div>
 
-                  {isMonetization ? (
-                    <>
-                      <div>
-                        <Label className="text-muted-foreground">Number of Days</Label>
-                        <p className="font-medium text-lg">{viewRequest.days_count} day(s)</p>
-                      </div>
-                      <div>
-                        <Label className="text-muted-foreground">Request Type</Label>
-                        <div className="flex gap-1 mt-1">
-                          {viewRequest.monetize_credits && <Badge variant="default">Monetization</Badge>}
-                          {viewRequest.commutation_requested && <Badge variant="secondary">Commutation</Badge>}
-                        </div>
-                      </div>
-                    </>
-                  ) : (
+                  {showLeaveDetails && (
                     <>
                       <div>
                         <Label className="text-muted-foreground">Inclusive Dates</Label>
@@ -615,6 +615,23 @@ export default function PendingRequestsPage() {
                         <p className="font-medium">{viewRequest.leave_location || 'N/A'}</p>
                       </div>
                     </>
+                  )}
+
+                  {isMonetization && !isCombined && (
+                    <div>
+                      <Label className="text-muted-foreground">Number of Days</Label>
+                      <p className="font-medium text-lg">{viewRequest.days_count} day(s)</p>
+                    </div>
+                  )}
+
+                  {isMonetization && (
+                    <div>
+                      <Label className="text-muted-foreground">Request Type</Label>
+                      <div className="flex gap-1 mt-1">
+                        {viewRequest.monetize_credits && <Badge variant="default">Monetization</Badge>}
+                        {viewRequest.commutation_requested && <Badge variant="secondary">Commutation</Badge>}
+                      </div>
+                    </div>
                   )}
 
                   <div>
@@ -646,7 +663,7 @@ export default function PendingRequestsPage() {
                           </div>
                           <div>
                             <p className="text-green-700 dark:text-green-300">Days to Monetize</p>
-                            <p className="font-bold text-green-900 dark:text-green-100">{viewRequest.days_count} days</p>
+                            <p className="font-bold text-green-900 dark:text-green-100">{monetizedDays} days</p>
                           </div>
                         </div>
                         <div className="mt-3 pt-3 border-t border-green-200 dark:border-green-700">
@@ -659,7 +676,7 @@ export default function PendingRequestsPage() {
                             </p>
                           </div>
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">
-                            Formula: Monthly Salary ÷ 22 × {viewRequest.days_count} days
+                            Formula: Monthly Salary ÷ 22 × {monetizedDays} days
                           </p>
                         </div>
                       </div>
@@ -675,7 +692,7 @@ export default function PendingRequestsPage() {
                           Monetization Request Summary
                         </p>
                         <p className="text-sm text-amber-800 dark:text-amber-200">
-                          This employee is requesting to convert {viewRequest.days_count} days of {viewRequest.leave_type}
+                          This employee is requesting to convert {monetizedDays} day(s) of {creditLabel}
                           {viewRequest.monetize_credits && ' for cash payment'}
                           {viewRequest.monetize_credits && viewRequest.commutation_requested && ' and '}
                           {viewRequest.commutation_requested && ' with commutation'}.

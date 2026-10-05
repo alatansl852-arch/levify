@@ -24,6 +24,7 @@ import {
   isWorkingDay,
   parseLocalDate,
 } from '@/lib/leave-utils';
+import { getDailyRate, computeCashValue } from '@/lib/salary-utils';
 import { FileText, Calendar as CalendarIcon, AlertCircle, X } from 'lucide-react';
 
 const leaveCategories = {
@@ -356,26 +357,16 @@ export default function ApplyLeavePage() {
 
   // ---------------------------------------------------------------------------
   // Monetization estimate — CSC formula: monthly salary ÷ 22 = daily rate.
-  // This now mirrors what HR sees in the review modal. The monthly salary is
-  // read from the logged-in user. If your AuthContext user object uses a
-  // different field name, change it here (see the two lookups below).
-  // If no salary is available yet, it falls back to the old flat ₱500 so the
-  // page still works.
+  // Uses the same salary-grade table as the HR review modal (src/lib/salary-utils),
+  // so the employee's estimate matches what HR sees.
   // ---------------------------------------------------------------------------
-  const salaryUser = user as
-    | (typeof user & { monthlySalary?: number; monthly_salary?: number })
-    | null
-    | undefined;
-  const monthlySalary = Number(salaryUser?.monthlySalary ?? salaryUser?.monthly_salary ?? 0);
-  const hasSalaryData = monthlySalary > 0;
-  const dailyRate = hasSalaryData
-    ? Math.round((monthlySalary / 22) * 100) / 100
-    : 500;
+  const dailyRate = getDailyRate(user?.salary_grade);
+  const hasSalaryData = dailyRate > 0;
 
   const parsedMonetizationDays = parseFloat(monetizationDays);
   const calculateMonetizationAmount = () => {
     if (!monetizationRequested || !monetizationDays || isNaN(parsedMonetizationDays)) return 0;
-    return Math.round(parsedMonetizationDays * dailyRate * 100) / 100;
+    return computeCashValue(user?.salary_grade, parsedMonetizationDays);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -854,6 +845,11 @@ export default function ApplyLeavePage() {
                           <p className="text-xs text-muted-foreground">
                             *Subject to final computation and fund availability
                           </p>
+                          {!hasSalaryData && (
+                            <p className="text-xs text-destructive">
+                              Your salary grade was not found, so no estimate can be shown. HR will compute the final amount.
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>
