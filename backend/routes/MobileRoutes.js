@@ -292,7 +292,7 @@ router.get('/leave/:id', authenticateToken, async (req, res) => {
 router.post('/apply', authenticateToken, upload.array('attachments', 5), async (req, res) => {
   try {
     const employeeId = req.user.employee_id;
-    const { leave_type, date_from, date_to, days_count, reason, monetize_credits, commutation_requested } = req.body;
+    const { leave_type, leave_location, date_from, date_to, days_count, reason, monetize_credits, commutation_requested } = req.body;
 
     // ✅ multipart/form-data sends booleans as strings ("true"/"false"), so parse explicitly
     const monetizeCreditsFlag = monetize_credits === 'true' || monetize_credits === true;
@@ -381,6 +381,13 @@ router.post('/apply', authenticateToken, upload.array('attachments', 5), async (
       }
     }
 
+    // ✅ Location (within the Philippines / abroad) only applies to Vacation Leave,
+    // same as the web app. Anything else is stored as NULL (HR sees "N/A").
+    const leaveLocationValue =
+      leave_type.toLowerCase().includes('vacation') && ['within_ph', 'abroad'].includes(leave_location)
+        ? leave_location
+        : null;
+
     const applicationNumber = `LA-${Date.now()}-${employeeId}`;
 
     const [result] = await db.query(
@@ -388,14 +395,15 @@ router.post('/apply', authenticateToken, upload.array('attachments', 5), async (
        (application_number, employee_id, leave_type, start_date, end_date, 
         days_count, reason, status, current_approver, monetize_credits,
         monetization_days, monetization_vl_days, monetization_sl_days,
-        commutation_requested, created_at) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'hr', $8, $9, $10, $11, $12, NOW()) 
+        commutation_requested, leave_location, created_at) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'hr', $8, $9, $10, $11, $12, $13, NOW()) 
        RETURNING *`,
       [
         applicationNumber, employeeId, leave_type, date_from, date_to,
         requestedDays, reason || '', monetizeCreditsFlag,
         monetizationTotal, monetizationVl, monetizationSl,
-        commutationRequestedFlag
+        commutationRequestedFlag,
+        leaveLocationValue
       ]
     );
 
