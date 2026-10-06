@@ -116,10 +116,14 @@ function AttachmentPreview({
   fileUrl,
   fileType,
   fileName,
+  onOpenImage,
 }: {
   fileUrl: string;
   fileType: string;
   fileName: string;
+  // ✅ Called when the HR clicks an image thumbnail — the parent shows it in
+  // an in-page lightbox instead of opening a new browser tab.
+  onOpenImage: (url: string, name: string) => void;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -177,17 +181,22 @@ function AttachmentPreview({
 
   if (status === 'ready' && previewUrl) {
     return (
-      <a href={fileUrl} target="_blank" rel="noopener noreferrer">
+      <button
+        type="button"
+        onClick={() => onOpenImage(previewUrl, fileName)}
+        className="block w-full"
+      >
         <img
           src={previewUrl}
           alt={fileName}
-          className="w-full h-40 object-cover hover:opacity-90 transition-opacity cursor-pointer"
+          className="w-full h-40 object-cover hover:opacity-90 transition-opacity cursor-zoom-in"
         />
-      </a>
+      </button>
     );
   }
 
-  // error / non-image fallback
+  // error / non-image fallback (e.g. PDF) — can't be shown as an image, so this
+  // is the only case that still opens in a new tab.
   return (
     <a
       href={fileUrl}
@@ -222,6 +231,8 @@ export default function PendingRequestsPage() {
   // ✅ Controls the side panel that shows the printable CSC form inline,
   // instead of opening a separate browser tab.
   const [printPanelOpen, setPrintPanelOpen] = useState(false);
+  // ✅ In-page image viewer for attachments (replaces opening a new tab).
+  const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null);
 
   useEffect(() => {
     if (user?.role) {
@@ -356,6 +367,7 @@ export default function PendingRequestsPage() {
     setViewRequest(null);
     setRemarks('');
     setAttachments([]);
+    setLightbox(null);
   };
 
   const formatDate = (dateString: string) => {
@@ -741,6 +753,7 @@ export default function PendingRequestsPage() {
                             fileUrl={getFileUrl(attachment.file_path)}
                             fileType={attachment.file_type}
                             fileName={attachment.file_name}
+                            onOpenImage={(url, name) => setLightbox({ url, name })}
                           />
                           <div className="p-2">
                             <p className="text-xs font-medium truncate">{attachment.file_name}</p>
@@ -787,6 +800,28 @@ export default function PendingRequestsPage() {
               {isProcessing ? 'Processing...' : 'Approve'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ✅ In-page image viewer — opens on top of the Review dialog when the
+          HR clicks an attachment thumbnail, so no new browser tab is needed. */}
+      <Dialog open={!!lightbox} onOpenChange={(open) => { if (!open) setLightbox(null); }}>
+        <DialogContent className="max-w-4xl w-auto p-3 sm:p-4">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-medium truncate pr-6">
+              {lightbox?.name}
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              Full-size preview of the attachment
+            </DialogDescription>
+          </DialogHeader>
+          {lightbox && (
+            <img
+              src={lightbox.url}
+              alt={lightbox.name}
+              className="max-h-[75vh] max-w-full mx-auto object-contain rounded-md"
+            />
+          )}
         </DialogContent>
       </Dialog>
 
