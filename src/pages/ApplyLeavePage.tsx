@@ -24,7 +24,7 @@ import {
   isWorkingDay,
   parseLocalDate,
 } from '@/lib/leave-utils';
-import { getDailyRate, computeCashValue } from '@/lib/salary-utils';
+import { computeMonetizationValue, getRatePerDay, MONETIZATION_CF } from '@/lib/salary-utils';
 import { FileText, Calendar as CalendarIcon, AlertCircle, X } from 'lucide-react';
 
 const leaveCategories = {
@@ -275,7 +275,10 @@ export default function ApplyLeavePage() {
   const [hospitalDetails, setHospitalDetails] = useState('');
   const [commutation, setCommutation] = useState<'requested' | 'not_requested'>('not_requested');
   const [monetizationRequested, setMonetizationRequested] = useState(false);
-  const [monetizationDays, setMonetizationDays] = useState('');
+  const [monetizationVlDays, setMonetizationVlDays] = useState('');
+  const [monetizationSlDays, setMonetizationSlDays] = useState('');
+  // Highest salary received (the 'S' in the MSU monetization formula), loaded from the backend.
+  const [monthlySalary, setMonthlySalary] = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [otherLeaveType, setOtherLeaveType] = useState('');
@@ -356,17 +359,34 @@ export default function ApplyLeavePage() {
   }, [leaveType]);
 
   // ---------------------------------------------------------------------------
-  // Monetization estimate — CSC formula: monthly salary ÷ 22 = daily rate.
-  // Uses the same salary-grade table as the HR review modal (src/lib/salary-utils),
-  // so the employee's estimate matches what HR sees.
+  // Monetization estimate — MSU HRDO / CSC-DBM formula:
+  //   Salary x No. of days to be monetized x 0.0481927
+  // where Salary = highest salary received (users.monthly_salary).
+  // Same helper as the HR review modal (src/lib/salary-utils), so both match.
   // ---------------------------------------------------------------------------
-  const dailyRate = getDailyRate(user?.salary_grade);
-  const hasSalaryData = dailyRate > 0;
+  useEffect(() => {
+    if (!user?.employeeId) return;
+    const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+    const token = localStorage.getItem('levify_token');
+    fetch(`${API_BASE}/leave/salary/${user.employeeId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.monthly_salary) setMonthlySalary(Number(data.monthly_salary));
+      })
+      .catch((err) => console.error('Failed to load salary:', err));
+  }, [user?.employeeId]);
 
-  const parsedMonetizationDays = parseFloat(monetizationDays);
+  const hasSalaryData = !!monthlySalary && monthlySalary > 0;
+  const ratePerDay = getRatePerDay(monthlySalary);
+
+  const vlDays = parseFloat(monetizationVlDays) || 0;
+  const slDays = parseFloat(monetizationSlDays) || 0;
+  const totalMonetizationDays = monetizationRequested ? vlDays + slDays : 0;
   const calculateMonetizationAmount = () => {
-    if (!monetizationRequested || !monetizationDays || isNaN(parsedMonetizationDays)) return 0;
-    return computeCashValue(user?.salary_grade, parsedMonetizationDays);
+    if (!monetizationRequested || totalMonetizationDays <= 0) return 0;
+    return computeMonetizationValue(monthlySalary, totalMonetizationDays);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -456,21 +476,23 @@ export default function ApplyLeavePage() {
       return;
     }
 
-    if (monetizationRequested && !monetizationDays) {
-      toast.error('Please enter number of days to monetize');
-      return;
-    }
-
-    // NEW: validate the monetization day count itself
+    // Validate the VL / SL days to monetize (both may be monetized)
     if (monetizationRequested) {
-      if (isNaN(parsedMonetizationDays) || parsedMonetizationDays <= 0) {
-        toast.error('Days to monetize must be greater than 0');
+      if (vlDays < 0 || slDays < 0 || vlDays + slDays <= 0) {
+        toast.error('Enter the number of VL or SL days to monetize');
         return;
       }
-      const maxMonetizable = balance?.vacationLeave ?? 0;
-      if (parsedMonetizationDays > maxMonetizable) {
+      const maxVl = balance?.vacationLeave ?? 0;
+      const maxSl = balance?.sickLeave ?? 0;
+      if (vlDays > maxVl) {
         toast.error('Not enough vacation leave credits', {
-          description: `You can monetize at most ${maxMonetizable.toFixed(2)} vacation leave day(s).`,
+          description: `You can monetize at most ${maxVl.toFixed(2)} VL day(s).`,
+        });
+        return;
+      }
+      if (slDays > maxSl) {
+        toast.error('Not enough sick leave credits', {
+          description: `You can monetize at most ${maxSl.toFixed(2)} SL day(s).`,
         });
         return;
       }
@@ -502,9 +524,9 @@ export default function ApplyLeavePage() {
       formData.append('days_count', numberOfDays.toString());
       formData.append('reason', reason);
       formData.append('monetize_credits', monetizationRequested ? '1' : '0');
-      // FIXED: the number of days to monetize was never sent before, so the
-      // backend/HR modal fell back to days_count (the leave duration).
-      formData.append('monetization_days', monetizationRequested ? String(parsedMonetizationDays) : '0');
+      // VL and SL days to monetize are sent separately (MSU splits them).
+      formData.append('monetization_vl_days', monetizationRequested ? String(vlDays) : '0');
+      formData.append('monetization_sl_days', monetizationRequested ? String(slDays) : '0');
       formData.append('commutation_requested', commutation === 'requested' ? '1' : '0');
 
       // Add hospital details if sick leave
@@ -786,7 +808,7 @@ export default function ApplyLeavePage() {
                   Monetization of Leave Credits
                 </CardTitle>
                 <CardDescription>
-                  Convert your unused vacation leave credits to cash (Optional)
+                  Convert your unused vacation and sick leave credits to cash (Optional)
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -796,7 +818,10 @@ export default function ApplyLeavePage() {
                     checked={monetizationRequested}
                     onCheckedChange={(checked) => {
                       setMonetizationRequested(checked as boolean);
-                      if (!checked) setMonetizationDays('');
+                      if (!checked) {
+                        setMonetizationVlDays('');
+                        setMonetizationSlDays('');
+                      }
                     }}
                   />
                   <Label htmlFor="monetization_checkbox" className="font-normal">
@@ -809,29 +834,57 @@ export default function ApplyLeavePage() {
                     <p className="text-sm text-muted-foreground">
                       Monetization of leave credits is subject to availability of funds and approval by the agency head.
                     </p>
-                    <div className="space-y-2">
-                      <Label htmlFor="monetization_days">Number of Days to Monetize</Label>
-                      <Input
-                        id="monetization_days"
-                        type="number"
-                        min="1"
-                        max={balance?.vacationLeave || 15}
-                        placeholder="Enter number of days"
-                        value={monetizationDays}
-                        onChange={(e) => setMonetizationDays(e.target.value)}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Maximum monetizable: {balance?.vacationLeave?.toFixed(2) || 0} vacation leave days
-                      </p>
-                      {monetizationDays && (
+                    <div className="space-y-4">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor="monetization_vl_days">Vacation Leave (VL) days</Label>
+                          <Input
+                            id="monetization_vl_days"
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            max={balance?.vacationLeave || 0}
+                            placeholder="0"
+                            value={monetizationVlDays}
+                            onChange={(e) => setMonetizationVlDays(e.target.value)}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Maximum: {balance?.vacationLeave?.toFixed(2) || '0.00'} VL days
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="monetization_sl_days">Sick Leave (SL) days</Label>
+                          <Input
+                            id="monetization_sl_days"
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            max={balance?.sickLeave || 0}
+                            placeholder="0"
+                            value={monetizationSlDays}
+                            onChange={(e) => setMonetizationSlDays(e.target.value)}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Maximum: {balance?.sickLeave?.toFixed(2) || '0.00'} SL days
+                          </p>
+                        </div>
+                      </div>
+
+                      {totalMonetizationDays > 0 && (
                         <div className="mt-3 p-4 bg-primary/10 rounded-lg space-y-2">
                           <div className="flex justify-between items-center">
-                            <span className="text-sm text-muted-foreground">Daily Rate{hasSalaryData ? ' (salary ÷ 22)' : ''}:</span>
-                            <span className="text-sm font-medium">{formatPeso(dailyRate)}</span>
+                            <span className="text-sm text-muted-foreground">Salary / Month:</span>
+                            <span className="text-sm font-medium">
+                              {hasSalaryData ? formatPeso(monthlySalary as number) : '—'}
+                            </span>
                           </div>
                           <div className="flex justify-between items-center">
-                            <span className="text-sm text-muted-foreground">Days:</span>
-                            <span className="text-sm font-medium">{monetizationDays}</span>
+                            <span className="text-sm text-muted-foreground">Days to monetize (VL {vlDays} + SL {slDays}):</span>
+                            <span className="text-sm font-medium">{totalMonetizationDays}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-muted-foreground">Constant Factor (CF):</span>
+                            <span className="text-sm font-medium">{MONETIZATION_CF}</span>
                           </div>
                           <div className="border-t pt-2 flex justify-between items-center">
                             <span className="text-sm font-semibold">Estimated Amount:</span>
@@ -840,14 +893,14 @@ export default function ApplyLeavePage() {
                             </span>
                           </div>
                           <p className="text-xs text-muted-foreground mt-2">
-                            Calculation: {monetizationDays} days × {formatPeso(dailyRate)} = {formatPeso(calculateMonetizationAmount())}
+                            Formula: Salary × No. of days × CF = {hasSalaryData ? formatPeso(monthlySalary as number) : '—'} × {totalMonetizationDays} × {MONETIZATION_CF}
                           </p>
                           <p className="text-xs text-muted-foreground">
                             *Subject to final computation and fund availability
                           </p>
                           {!hasSalaryData && (
                             <p className="text-xs text-destructive">
-                              Your salary grade was not found, so no estimate can be shown. HR will compute the final amount.
+                              Your monthly salary is not on file yet, so no estimate can be shown. HR will compute the final amount.
                             </p>
                           )}
                         </div>
@@ -957,11 +1010,11 @@ export default function ApplyLeavePage() {
                     </div>
                   )}
 
-                  {monetizationRequested && monetizationDays && (
+                  {monetizationRequested && totalMonetizationDays > 0 && (
                     <>
                       <div className="flex justify-between text-sm border-t pt-2">
                         <span className="text-muted-foreground">Monetization:</span>
-                        <span className="font-medium">{monetizationDays} day(s)</span>
+                        <span className="font-medium">{totalMonetizationDays} day(s) (VL {vlDays} / SL {slDays})</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">Est. Amount:</span>

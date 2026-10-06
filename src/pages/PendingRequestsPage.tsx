@@ -37,7 +37,7 @@ import { Clock, CheckCircle, XCircle, Eye, FileText, Paperclip, Loader2, Printer
 import { toast } from 'sonner';
 import heic2any from 'heic2any';
 import PrintableLeaveForm from '@/components/PrintableLeaveForm';
-import { getMonthlySalary, getDailyRate, computeCashValue } from '@/lib/salary-utils';
+import { computeMonetizationValue, MONETIZATION_CF } from '@/lib/salary-utils';
 
 interface Attachment {
   id: number;
@@ -70,7 +70,11 @@ interface LeaveApplication {
   commutation_requested?: boolean;
   // Number of vacation credits the employee wants converted to cash.
   // Postgres NUMERIC comes back as a string, and it is null on older rows.
-  monetization_days?: number | string | null;
+  monetization_days?: number | string | null; // total = VL + SL
+  monetization_vl_days?: number | string | null;
+  monetization_sl_days?: number | string | null;
+  // Highest salary received (the 'S' in the MSU monetization formula)
+  monthly_salary?: number | string | null;
   salary_grade?: number;
 }
 
@@ -81,16 +85,16 @@ interface CombinedApplication extends LeaveApplication {
 }
 
 /**
- * Days that are actually being monetized.
- * Newer applications store this in monetization_days. Older ones were saved
- * before that column existed, so we fall back to days_count for them.
+ * Days that are actually being monetized (VL + SL).
+ * Newer applications store them in monetization_vl_days / monetization_sl_days
+ * (and the total in monetization_days). Older rows fall back to days_count.
  */
 const getMonetizedDays = (app: LeaveApplication): number => {
   const md = Number(app.monetization_days);
   return md > 0 ? md : Number(app.days_count) || 0;
 };
 
-/** True when the application carries its own monetization_days (leave + monetization filed together). */
+/** True when the application carries its own monetization days (leave + monetization filed together). */
 const hasOwnMonetizationDays = (app: LeaveApplication): boolean => {
   return Number(app.monetization_days) > 0;
 };
@@ -560,13 +564,16 @@ export default function PendingRequestsPage() {
             // Older monetization-only rows fall back to days_count.
             const isCombined = isMonetization && hasOwnMonetizationDays(viewRequest);
             const showLeaveDetails = !isMonetization || isCombined;
-            const sg = viewRequest.salary_grade || 0;
-            const monthlySalary = getMonthlySalary(sg);
-            const dailyRate = getDailyRate(sg);
+            const monthlySalary = Number(viewRequest.monthly_salary) || 0;
             const monetizedDays = getMonetizedDays(viewRequest);
-            const cashValue = computeCashValue(sg, monetizedDays);
-            // Monetization converts VACATION credits when the leave itself is a different type.
-            const creditLabel = isCombined ? 'vacation leave credits' : viewRequest.leave_type;
+            const vlDays = Number(viewRequest.monetization_vl_days) || 0;
+            const slDays = Number(viewRequest.monetization_sl_days) || 0;
+            const hasSalary = monthlySalary > 0;
+            const cashValue = computeMonetizationValue(monthlySalary, monetizedDays);
+            // Legacy rows (no VL/SL split) fall back to the leave type's name.
+            const creditLabel = isCombined
+              ? [vlDays > 0 ? `${vlDays} VL` : '', slDays > 0 ? `${slDays} SL` : ''].filter(Boolean).join(' + ') + ' leave credits'
+              : viewRequest.leave_type;
 
             return (
               <div className="space-y-4">
@@ -646,37 +653,41 @@ export default function PendingRequestsPage() {
                     <div className="flex items-start gap-3">
                       <div className="w-full">
                         <p className="font-medium text-green-900 dark:text-green-100 mb-3">
-                          Monetization Computation (CSC Formula)
+                          Monetization Computation (MSU / CSC Formula)
                         </p>
                         <div className="grid grid-cols-2 gap-3 text-sm">
                           <div>
-                            <p className="text-green-700 dark:text-green-300">Salary Grade</p>
-                            <p className="font-bold text-green-900 dark:text-green-100">SG - {sg}</p>
+                            <p className="text-green-700 dark:text-green-300">Salary / Month (highest salary received)</p>
+                            <p className="font-bold text-green-900 dark:text-green-100">
+                              {hasSalary ? formatCurrency(monthlySalary) : 'Not on file'}
+                            </p>
                           </div>
                           <div>
-                            <p className="text-green-700 dark:text-green-300">Monthly Salary</p>
-                            <p className="font-bold text-green-900 dark:text-green-100">{formatCurrency(monthlySalary)}</p>
-                          </div>
-                          <div>
-                            <p className="text-green-700 dark:text-green-300">Daily Rate (÷ 22 days)</p>
-                            <p className="font-bold text-green-900 dark:text-green-100">{formatCurrency(dailyRate)}</p>
+                            <p className="text-green-700 dark:text-green-300">Constant Factor (CF)</p>
+                            <p className="font-bold text-green-900 dark:text-green-100">{MONETIZATION_CF}</p>
                           </div>
                           <div>
                             <p className="text-green-700 dark:text-green-300">Days to Monetize</p>
                             <p className="font-bold text-green-900 dark:text-green-100">{monetizedDays} days</p>
                           </div>
+                          {isCombined && (
+                            <div>
+                              <p className="text-green-700 dark:text-green-300">Breakdown</p>
+                              <p className="font-bold text-green-900 dark:text-green-100">VL {vlDays} / SL {slDays}</p>
+                            </div>
+                          )}
                         </div>
                         <div className="mt-3 pt-3 border-t border-green-200 dark:border-green-700">
                           <div className="flex justify-between items-center">
                             <p className="font-medium text-green-800 dark:text-green-200">
                               Estimated Cash Value
                             </p>
-                            <p className={sg > 0 ? 'text-2xl font-bold text-green-700 dark:text-green-300' : 'text-sm font-semibold text-green-700 dark:text-green-300'}>
-                              {sg > 0 ? formatCurrency(cashValue) : 'N/A — No Salary Grade'}
+                            <p className={hasSalary ? 'text-2xl font-bold text-green-700 dark:text-green-300' : 'text-sm font-semibold text-green-700 dark:text-green-300'}>
+                              {hasSalary ? formatCurrency(cashValue) : 'N/A — No monthly salary on file'}
                             </p>
                           </div>
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">
-                            Formula: Monthly Salary ÷ 22 × {monetizedDays} days
+                            Formula: Salary × No. of days × CF = {hasSalary ? formatCurrency(monthlySalary) : '—'} × {monetizedDays} × {MONETIZATION_CF}
                           </p>
                         </div>
                       </div>
