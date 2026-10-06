@@ -131,9 +131,11 @@ router.get('/profile', authenticateToken, async (req, res) => {
     const userId = req.user.id;
     console.log('📱 Fetching profile for user ID:', userId);
 
+    // ✅ monthly_salary added — the 'S' in the monetization formula
+    // (Salary x days x 0.0481927), used by the mobile Apply Leave estimate.
     const result = await db.query(
       `SELECT id, employee_id, full_name, email, department, position,
-        employee_type, employment_type, role, salary_grade,
+        employee_type, employment_type, role, salary_grade, monthly_salary,
         total_leave_credits, total_leave_availed,
         vacation_leave_balance, sick_leave_balance,
         special_privilege_leave_balance, forced_leave_balance
@@ -162,6 +164,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
         employment_type: user.employment_type,
         role: user.role,
         salary_grade: user.salary_grade ?? 'N/A',
+        monthly_salary: user.monthly_salary != null ? parseFloat(user.monthly_salary) || null : null,
         total_leave_credits: parseFloat(user.total_leave_credits) || 0,
         total_leave_availed: totalUsed,
         leave_balances: {
@@ -234,6 +237,30 @@ router.get('/leave/:id', authenticateToken, async (req, res) => {
     if (leaves.length === 0) return res.status(404).json({ success: false, message: 'Leave application not found' });
 
     const leave = leaves[0];
+
+    // ✅ Attachments the employee submitted with this application, so the mobile
+    // Leave Details screen can show the pictures (same table the web HR view reads).
+    let attachments = [];
+    try {
+      const [attachmentRows] = await db.query(
+        `SELECT id, file_name, file_path, file_size, file_type
+         FROM leave_attachments
+         WHERE leave_application_id = $1
+         ORDER BY id`,
+        [id]
+      );
+      attachments = attachmentRows.map(a => ({
+        id:        a.id,
+        file_name: a.file_name,
+        file_path: a.file_path,
+        file_size: parseInt(a.file_size) || 0,
+        file_type: a.file_type
+      }));
+    } catch (attachmentError) {
+      // Never break the details screen just because attachments couldn't load.
+      console.error('⚠️ Could not load attachments:', attachmentError.message);
+    }
+
     res.json({
       success: true,
       leave: {
@@ -252,6 +279,7 @@ router.get('/leave/:id', authenticateToken, async (req, res) => {
           ovcaa: { remarks: leave.ovcaa_remarks || null },
           ovcaf: { remarks: leave.ovcaf_remarks || null },
         },
+        attachments,
       }
     });
   } catch (error) {
@@ -270,9 +298,18 @@ router.post('/apply', authenticateToken, upload.array('attachments', 5), async (
     const monetizeCreditsFlag = monetize_credits === 'true' || monetize_credits === true;
     const commutationRequestedFlag = commutation_requested === 'true' || commutation_requested === true;
 
+    // ✅ VL and SL days to monetize are sent separately (MSU splits them), same as the web app.
+    // Older app versions only send a single `monetize_days` total — treat that as VL days.
+    let monetizationVl = monetizeCreditsFlag ? (parseFloat(req.body.monetization_vl_days) || 0) : 0;
+    let monetizationSl = monetizeCreditsFlag ? (parseFloat(req.body.monetization_sl_days) || 0) : 0;
+    if (monetizeCreditsFlag && monetizationVl + monetizationSl <= 0) {
+      monetizationVl = parseFloat(req.body.monetize_days) || 0;
+    }
+    const monetizationTotal = monetizationVl + monetizationSl;
+
     console.log('📱 Leave application from:', employeeId);
     console.log('📎 Files received:', req.files ? req.files.length : 0);
-    console.log('💰 Monetize credits:', monetizeCreditsFlag, '| Commutation:', commutationRequestedFlag);
+    console.log('💰 Monetize credits:', monetizeCreditsFlag, '(VL', monetizationVl, '+ SL', monetizationSl, ') | Commutation:', commutationRequestedFlag);
 
     if (!leave_type || !date_from || !date_to || !days_count) {
       return res.status(400).json({ success: false, message: 'All fields are required' });
@@ -309,6 +346,30 @@ router.post('/apply', authenticateToken, upload.array('attachments', 5), async (
       });
     }
 
+    // ✅ Validate the VL / SL days to monetize against the employee's own credits
+    if (monetizeCreditsFlag) {
+      if (monetizationVl < 0 || monetizationSl < 0 || monetizationTotal <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Enter the number of VL or SL days to monetize.'
+        });
+      }
+      const vlBalance = parseFloat(user.vacation_leave_balance) || 0;
+      const slBalance = parseFloat(user.sick_leave_balance) || 0;
+      if (monetizationVl > vlBalance) {
+        return res.status(400).json({
+          success: false,
+          message: `Not enough vacation leave credits. You can monetize at most ${vlBalance.toFixed(2)} VL day(s).`
+        });
+      }
+      if (monetizationSl > slBalance) {
+        return res.status(400).json({
+          success: false,
+          message: `Not enough sick leave credits. You can monetize at most ${slBalance.toFixed(2)} SL day(s).`
+        });
+      }
+    }
+
     // ✅ Monetization requires a minimum of 15 days VL balance remaining before excess can be converted (CSC Omnibus Rules)
     if (monetizeCreditsFlag && leave_type.toLowerCase().includes('vacation')) {
       const remainingAfterLeave = availableBalance - requestedDays;
@@ -325,10 +386,17 @@ router.post('/apply', authenticateToken, upload.array('attachments', 5), async (
     const [result] = await db.query(
       `INSERT INTO leave_applications 
        (application_number, employee_id, leave_type, start_date, end_date, 
-        days_count, reason, status, current_approver, monetize_credits, commutation_requested, created_at) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'hr', $8, $9, NOW()) 
+        days_count, reason, status, current_approver, monetize_credits,
+        monetization_days, monetization_vl_days, monetization_sl_days,
+        commutation_requested, created_at) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'hr', $8, $9, $10, $11, $12, NOW()) 
        RETURNING *`,
-      [applicationNumber, employeeId, leave_type, date_from, date_to, requestedDays, reason || '', monetizeCreditsFlag, commutationRequestedFlag]
+      [
+        applicationNumber, employeeId, leave_type, date_from, date_to,
+        requestedDays, reason || '', monetizeCreditsFlag,
+        monetizationTotal, monetizationVl, monetizationSl,
+        commutationRequestedFlag
+      ]
     );
 
     const leaveAppId = result[0].id;
