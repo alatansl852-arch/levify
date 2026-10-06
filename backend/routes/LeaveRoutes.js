@@ -93,38 +93,51 @@ router.post('/apply', upload.array('attachments', 5), async (req, res) => {
   try {
     console.log('📨 Leave application received');
     console.log('Request body:', req.body);
-    const { employee_id, leave_type, leave_location, start_date, end_date, days_count, reason, monetize_credits, monetization_days, commutation_requested } = req.body;
+    const { employee_id, leave_type, leave_location, start_date, end_date, days_count, reason, monetize_credits, monetization_vl_days, monetization_sl_days, commutation_requested } = req.body;
 
     // Also fetch the vacation balance so we can validate the monetization request
-    const [users] = await db.query('SELECT id, vacation_leave_balance FROM users WHERE employee_id = $1', [employee_id]);
+    const [users] = await db.query('SELECT id, vacation_leave_balance, sick_leave_balance FROM users WHERE employee_id = $1', [employee_id]);
     if (users.length === 0) return res.status(400).json({ success: false, message: 'Invalid employee ID' });
 
-    // ✅ NEW: validate and normalize the number of days to monetize.
-    // Stays NULL when the employee is not monetizing.
-    let monetizationDays = null;
+    // ✅ Validate the VL / SL days to monetize (MSU lets both be monetized).
+    // Stay NULL when the employee is not monetizing.
+    let monetizationVlDays = null;
+    let monetizationSlDays = null;
+    let monetizationDays = null; // total = VL + SL
     if (isTruthy(monetize_credits)) {
-      monetizationDays = parseFloat(monetization_days);
-      if (isNaN(monetizationDays) || monetizationDays <= 0) {
-        return res.status(400).json({ success: false, message: 'Days to monetize must be greater than 0' });
+      const vl = parseFloat(monetization_vl_days) || 0;
+      const sl = parseFloat(monetization_sl_days) || 0;
+      if (vl < 0 || sl < 0 || vl + sl <= 0) {
+        return res.status(400).json({ success: false, message: 'Enter at least 1 day of VL or SL to monetize' });
       }
       const vacationBalance = parseFloat(users[0].vacation_leave_balance) || 0;
-      if (monetizationDays > vacationBalance) {
+      const sickBalance = parseFloat(users[0].sick_leave_balance) || 0;
+      if (vl > vacationBalance) {
         return res.status(400).json({
           success: false,
-          message: `Not enough vacation leave credits. You can monetize at most ${vacationBalance} day(s).`
+          message: `Not enough vacation leave credits. You can monetize at most ${vacationBalance} VL day(s).`
         });
       }
+      if (sl > sickBalance) {
+        return res.status(400).json({
+          success: false,
+          message: `Not enough sick leave credits. You can monetize at most ${sickBalance} SL day(s).`
+        });
+      }
+      monetizationVlDays = vl;
+      monetizationSlDays = sl;
+      monetizationDays = vl + sl;
     }
 
     const year = new Date().getFullYear();
     const [countResult] = await db.query('SELECT COUNT(*) as count FROM leave_applications WHERE EXTRACT(YEAR FROM created_at) = $1', [year]);
     const appNumber = `LV-${year}-${String(parseInt(countResult[0].count) + 1).padStart(4, '0')}`;
     const [result] = await db.query(
-      `INSERT INTO leave_applications (employee_id, application_number, leave_type, leave_location, start_date, end_date, days_count, reason, monetize_credits, commutation_requested, monetization_days, status, current_approver) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', 'hr') RETURNING id`,
-      [employee_id, appNumber, leave_type, leave_location, start_date, end_date, days_count, reason, monetize_credits, commutation_requested, monetizationDays]
+      `INSERT INTO leave_applications (employee_id, application_number, leave_type, leave_location, start_date, end_date, days_count, reason, monetize_credits, commutation_requested, monetization_days, monetization_vl_days, monetization_sl_days, status, current_approver) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending', 'hr') RETURNING id`,
+      [employee_id, appNumber, leave_type, leave_location, start_date, end_date, days_count, reason, monetize_credits, commutation_requested, monetizationDays, monetizationVlDays, monetizationSlDays]
     );
     const leaveAppId = result[0].id;
-    console.log('✅ Leave application created with ID:', leaveAppId, '| monetization_days:', monetizationDays);
+    console.log('✅ Leave application created with ID:', leaveAppId, '| monetization VL/SL:', monetizationVlDays, '/', monetizationSlDays);
 
     // Save attachments
     if (req.files && req.files.length > 0) {
@@ -189,7 +202,7 @@ router.get('/monetization/:role', async (req, res) => {
     const { role } = req.params;
     console.log('🔵 Fetching MONETIZATION requests for role:', role);
     const [applications] = await db.query(
-      `SELECT la.*, u.full_name as employee_name, u.email, u.department, u.position, u.salary_grade,
+      `SELECT la.*, u.full_name as employee_name, u.email, u.department, u.position, u.salary_grade, u.monthly_salary,
         (SELECT COUNT(*) FROM leave_attachments WHERE leave_application_id = la.id) as attachment_count
        FROM leave_applications la
        JOIN users u ON la.employee_id = u.employee_id
@@ -203,6 +216,19 @@ router.get('/monetization/:role', async (req, res) => {
     res.json({ success: true, applications });
   } catch (error) {
     console.error('❌ Error fetching monetization requests:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET EMPLOYEE MONTHLY SALARY (used by the Apply Leave form's monetization estimate)
+router.get('/salary/:employee_id', async (req, res) => {
+  try {
+    const { employee_id } = req.params;
+    const [rows] = await db.query('SELECT monthly_salary FROM users WHERE employee_id = $1', [employee_id]);
+    if (rows.length === 0) return res.status(404).json({ success: false, message: 'Employee not found' });
+    res.json({ success: true, monthly_salary: rows[0].monthly_salary !== null ? parseFloat(rows[0].monthly_salary) : null });
+  } catch (error) {
+    console.error('❌ Error fetching salary:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -301,17 +327,27 @@ router.post('/process/:id', async (req, res) => {
             console.warn('⚠️ No balance field found for leave type:', application.leave_type);
           }
 
-          // ✅ NEW: monetized credits always come out of the VACATION balance,
-          // on top of the leave days deducted above.
-          const monetizedDays = parseFloat(application.monetization_days) || 0;
-          if (isMonetized && monetizedDays > 0) {
+          // ✅ Monetized credits: VL days come out of the VL balance and SL days
+          // out of the SL balance, on top of the leave days deducted above.
+          const monetizedVl = parseFloat(application.monetization_vl_days) || 0;
+          const monetizedSl = parseFloat(application.monetization_sl_days) || 0;
+          if (isMonetized && monetizedVl > 0) {
             await db.query(
               `UPDATE users 
                SET vacation_leave_balance = GREATEST(vacation_leave_balance - $1, 0) 
                WHERE employee_id = $2`,
-              [monetizedDays, application.employee_id]
+              [monetizedVl, application.employee_id]
             );
-            console.log('✅ Monetized vacation credits deducted:', monetizedDays, 'for:', application.employee_id);
+            console.log('✅ Monetized VL deducted:', monetizedVl, 'for:', application.employee_id);
+          }
+          if (isMonetized && monetizedSl > 0) {
+            await db.query(
+              `UPDATE users 
+               SET sick_leave_balance = GREATEST(sick_leave_balance - $1, 0) 
+               WHERE employee_id = $2`,
+              [monetizedSl, application.employee_id]
+            );
+            console.log('✅ Monetized SL deducted:', monetizedSl, 'for:', application.employee_id);
           }
         } else {
           console.log('ℹ️ Commutation — skipping balance deduction');
