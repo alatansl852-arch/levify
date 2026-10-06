@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLeave } from '@/contexts/LeaveContext';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -24,16 +25,134 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { FileText, Eye, Download } from 'lucide-react';
+import { FileText, Eye, Download, Loader2 } from 'lucide-react';
+import heic2any from 'heic2any';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+const FILE_BASE_URL = API_BASE_URL.replace(/\/api$/, '');
+
+const getFileUrl = (filePath: string) => {
+  const normalized = (filePath || '').replace(/\\/g, '/');
+  return `${FILE_BASE_URL}/${normalized.replace(/^\//, '')}`;
+};
+
+/**
+ * Thumbnail for an attachment. Images (including HEIC, converted to JPEG)
+ * show as a picture; clicking opens the in-page viewer via onOpenImage.
+ * Non-image files (PDF, Word, ...) show a file icon that opens in a new tab.
+ */
+function AttachmentPreview({
+  fileUrl,
+  fileType,
+  fileName,
+  onOpenImage,
+}: {
+  fileUrl: string;
+  fileType: string;
+  fileName: string;
+  onOpenImage: (url: string, name: string) => void;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+
+  const isHeic =
+    fileType?.toLowerCase().includes('heic') ||
+    fileType?.toLowerCase().includes('heif') ||
+    fileName?.toLowerCase().endsWith('.heic') ||
+    fileName?.toLowerCase().endsWith('.heif');
+
+  const isPlainImage = !isHeic && fileType?.startsWith('image/');
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+
+    if (isHeic) {
+      setStatus('loading');
+      fetch(fileUrl)
+        .then((res) => res.blob())
+        .then((blob) => heic2any({ blob, toType: 'image/jpeg', quality: 0.8 }))
+        .then((converted) => {
+          if (cancelled) return;
+          const convertedBlob = Array.isArray(converted) ? converted[0] : converted;
+          objectUrl = URL.createObjectURL(convertedBlob as Blob);
+          setPreviewUrl(objectUrl);
+          setStatus('ready');
+        })
+        .catch((err) => {
+          console.error('HEIC conversion failed:', err);
+          if (!cancelled) setStatus('error');
+        });
+    } else if (isPlainImage) {
+      setPreviewUrl(fileUrl);
+      setStatus('ready');
+    } else {
+      setStatus('error'); // not an image — use file icon fallback
+    }
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileUrl, isHeic, isPlainImage]);
+
+  if (status === 'loading') {
+    return (
+      <div className="flex flex-col items-center justify-center h-40 bg-muted/50">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground mb-2" />
+        <p className="text-xs text-muted-foreground">Loading preview...</p>
+      </div>
+    );
+  }
+
+  if (status === 'ready' && previewUrl) {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenImage(previewUrl, fileName)}
+        className="block w-full"
+      >
+        <img
+          src={previewUrl}
+          alt={fileName}
+          className="w-full h-40 object-cover hover:opacity-90 transition-opacity cursor-zoom-in"
+        />
+      </button>
+    );
+  }
+
+  // error / non-image fallback (e.g. PDF) — opens in a new tab
+  return (
+    <a
+      href={fileUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center justify-center h-40 bg-muted/50 hover:bg-muted transition-colors"
+    >
+      <div className="text-center">
+        <FileText className="h-10 w-10 mx-auto text-muted-foreground mb-2" />
+        <p className="text-xs text-muted-foreground">Click to view</p>
+      </div>
+    </a>
+  );
+}
 
 export default function LeaveHistoryPage() {
   const { user } = useAuth();
   const { getEmployeeLeaveHistory, leaveRequests } = useLeave();
   const [viewRequest, setViewRequest] = useState<number | null>(null);
+  // ✅ In-page image viewer for attachments (no new tab).
+  const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null);
 
   // FIXED: Use employeeId instead of id
   const history = user ? getEmployeeLeaveHistory(user.employeeId) : [];
   const viewRequestData = leaveRequests.find((r) => r.id === viewRequest);
+
+  const closeDetails = () => {
+    setViewRequest(null);
+    setLightbox(null);
+  };
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B';
@@ -41,17 +160,8 @@ export default function LeaveHistoryPage() {
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
   };
 
-  const getFileIcon = (type: string) => {
-    if (type.includes('pdf')) return '📄';
-    if (type.includes('image')) return '🖼️';
-    if (type.includes('word') || type.includes('document')) return '📝';
-    return '📎';
-  };
-
   const downloadFile = (file: any) => {
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-    const fileUrl = `${API_BASE_URL.replace('/api', '')}/${file.url}`;
-    window.open(fileUrl, '_blank');
+    window.open(getFileUrl(file.url), '_blank');
   };
 
   return (
@@ -134,7 +244,7 @@ export default function LeaveHistoryPage() {
       </Card>
 
       {/* View Details Dialog */}
-      <Dialog open={!!viewRequest} onOpenChange={() => setViewRequest(null)}>
+      <Dialog open={!!viewRequest} onOpenChange={closeDetails}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -208,23 +318,30 @@ export default function LeaveHistoryPage() {
                       {viewRequestData.attachments.length} file(s)
                     </span>
                   </div>
-                  <div className="space-y-2 rounded-lg border p-3 bg-muted/30">
-                    {viewRequestData.attachments.map((file) => (
-                      <div key={file.id} className="flex items-center gap-3 p-2 bg-background rounded border">
-                        <div className="text-xl">{getFileIcon(file.type)}</div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{file.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatFileSize(file.size)}
-                          </p>
+                  <div className="grid grid-cols-2 gap-3 rounded-lg border p-3 bg-muted/30">
+                    {viewRequestData.attachments.map((file: any) => (
+                      <div key={file.id} className="border rounded-lg overflow-hidden bg-background">
+                        <AttachmentPreview
+                          fileUrl={getFileUrl(file.url)}
+                          fileType={file.type}
+                          fileName={file.name}
+                          onOpenImage={(url, name) => setLightbox({ url, name })}
+                        />
+                        <div className="flex items-center gap-2 p-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium truncate">{file.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {formatFileSize(file.size)}
+                            </p>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => downloadFile(file)}
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => downloadFile(file)}
-                        >
-                          <Download className="h-4 w-4" />
-                        </Button>
                       </div>
                     ))}
                   </div>
@@ -261,10 +378,33 @@ export default function LeaveHistoryPage() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setViewRequest(null)}>
+            <Button variant="outline" onClick={closeDetails}>
               Close
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ✅ Full-screen in-page image viewer — opens on top of the details dialog */}
+      <Dialog open={!!lightbox} onOpenChange={(open) => { if (!open) setLightbox(null); }}>
+        <DialogContent className="max-w-none sm:max-w-none w-[96vw] h-[94vh] p-3 sm:p-4 flex flex-col gap-2">
+          <DialogHeader className="shrink-0">
+            <DialogTitle className="text-sm font-medium truncate pr-6">
+              {lightbox?.name}
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              Full-size preview of the attachment
+            </DialogDescription>
+          </DialogHeader>
+          {lightbox && (
+            <div className="flex-1 min-h-0 flex items-center justify-center bg-muted/30 rounded-md overflow-hidden">
+              <img
+                src={lightbox.url}
+                alt={lightbox.name}
+                className="w-full h-full object-contain"
+              />
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </DashboardLayout>

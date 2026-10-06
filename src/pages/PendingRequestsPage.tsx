@@ -806,8 +806,8 @@ export default function PendingRequestsPage() {
       {/* ✅ In-page image viewer — opens on top of the Review dialog when the
           HR clicks an attachment thumbnail, so no new browser tab is needed. */}
       <Dialog open={!!lightbox} onOpenChange={(open) => { if (!open) setLightbox(null); }}>
-        <DialogContent className="max-w-4xl w-auto p-3 sm:p-4">
-          <DialogHeader>
+        <DialogContent className="max-w-none sm:max-w-none w-[96vw] h-[94vh] p-3 sm:p-4 flex flex-col gap-2">
+          <DialogHeader className="shrink-0">
             <DialogTitle className="text-sm font-medium truncate pr-6">
               {lightbox?.name}
             </DialogTitle>
@@ -816,11 +816,13 @@ export default function PendingRequestsPage() {
             </DialogDescription>
           </DialogHeader>
           {lightbox && (
-            <img
-              src={lightbox.url}
-              alt={lightbox.name}
-              className="max-h-[75vh] max-w-full mx-auto object-contain rounded-md"
-            />
+            <div className="flex-1 min-h-0 flex items-center justify-center bg-muted/30 rounded-md overflow-hidden">
+              <img
+                src={lightbox.url}
+                alt={lightbox.name}
+                className="w-full h-full object-contain"
+              />
+            </div>
           )}
         </DialogContent>
       </Dialog>
