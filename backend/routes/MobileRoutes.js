@@ -381,12 +381,12 @@ router.post('/apply', authenticateToken, upload.array('attachments', 5), async (
       }
     }
 
-    // ✅ Location (within the Philippines / abroad) only applies to Vacation Leave,
-    // same as the web app. Anything else is stored as NULL (HR sees "N/A").
-    const leaveLocationValue =
-      leave_type.toLowerCase().includes('vacation') && ['within_ph', 'abroad'].includes(leave_location)
-        ? leave_location
-        : null;
+    // ✅ Location (within the Philippines / abroad) is stored for every leave type,
+    // same as the web app (which always sends it). Falls back to 'within_ph' so HR
+    // never sees "N/A" on a new application.
+    const leaveLocationValue = ['within_ph', 'abroad'].includes(leave_location)
+      ? leave_location
+      : 'within_ph';
 
     const applicationNumber = `LA-${Date.now()}-${employeeId}`;
 
