@@ -19,13 +19,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from '@/components/ui/sheet';
-import {
   Table,
   TableBody,
   TableCell,
@@ -238,9 +231,9 @@ export default function PendingRequestsPage() {
   // ✅ Holds the application that just received its final approval, so we can
   // show a "Ready to Print" confirmation instead of just closing the dialog.
   const [printReadyApp, setPrintReadyApp] = useState<CombinedApplication | null>(null);
-  // ✅ Controls the side panel that shows the printable CSC form inline,
-  // instead of opening a separate browser tab.
-  const [printPanelOpen, setPrintPanelOpen] = useState(false);
+  // ✅ True while the print dialog is being opened for the approved form.
+  // Printing happens right here in the same tab (no new tab, no side panel).
+  const [printing, setPrinting] = useState(false);
   // ✅ In-page image viewer for attachments (replaces opening a new tab).
   const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null);
 
@@ -842,7 +835,13 @@ export default function PendingRequestsPage() {
       </Dialog>
 
       {/* Ready to Print — shown only after the request receives its final approval */}
-      <Dialog open={!!printReadyApp && !printPanelOpen} onOpenChange={() => setPrintReadyApp(null)}>
+      <Dialog
+        open={!!printReadyApp}
+        onOpenChange={() => {
+          setPrintReadyApp(null);
+          setPrinting(false);
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -858,51 +857,28 @@ export default function PendingRequestsPage() {
             <Button variant="outline" onClick={() => setPrintReadyApp(null)}>
               Close
             </Button>
-            <Button
-              onClick={() => {
-                // ✅ Open the printable form in a side panel instead of a new
-                // tab — new tabs re-mount the app and can briefly redirect to
-                // login before AuthContext finishes reading localStorage.
-                // The side panel reuses this tab's already-authenticated state.
-                setPrintPanelOpen(true);
-              }}
-            >
-              <Printer className="mr-2 h-4 w-4" />
-              Open Printable Form
+            <Button onClick={() => setPrinting(true)} disabled={printing}>
+              {printing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Printer className="mr-2 h-4 w-4" />
+              )}
+              {printing ? 'Preparing...' : 'Print Leave Form'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Side panel showing the printable CSC leave form */}
-      <Sheet
-        open={printPanelOpen}
-        onOpenChange={(open) => {
-          setPrintPanelOpen(open);
-          if (!open) setPrintReadyApp(null);
-        }}
-      >
-        <SheetContent
-          side="right"
-          className="w-full sm:max-w-2xl overflow-y-auto print:max-w-none print:w-full"
-        >
-          <SheetHeader className="print:hidden">
-            <SheetTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5" />
-              Printable Leave Form
-            </SheetTitle>
-            <SheetDescription>
-              {printReadyApp?.application_number} — ready to print for wet signature
-            </SheetDescription>
-          </SheetHeader>
-
-          <div className="mt-4">
-            {printReadyApp && (
-              <PrintableLeaveForm applicationId={printReadyApp.id} />
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
+      {/* Prints the CSC leave form right in this tab — loads the data, then opens
+          the print dialog by itself. Nothing is shown on screen. */}
+      {printing && printReadyApp && (
+        <PrintableLeaveForm
+          applicationId={printReadyApp.id}
+          autoPrint
+          printOnly
+          onDone={() => setPrinting(false)}
+        />
+      )}
     </DashboardLayout>
   );
 }

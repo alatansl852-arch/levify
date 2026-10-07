@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -96,6 +96,12 @@ interface PrintableLeaveFormProps {
   applicationId: number;
   /** Show the "Print" button at the top of the form. Default true. */
   showPrintButton?: boolean;
+  /** Open the browser print dialog by itself as soon as the form has loaded (same tab). */
+  autoPrint?: boolean;
+  /** Skip the on-screen preview — only the print copy is rendered (use with autoPrint). */
+  printOnly?: boolean;
+  /** Called after the print dialog closes (or if loading failed). */
+  onDone?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +131,13 @@ const formatPeso = (amount: number): string =>
     minimumFractionDigits: 2,
   }).format(amount);
 
-const safeJson = async (res: Response | null): Promise<any> => {
+interface SafeJson {
+  success?: boolean;
+  balance?: { vacationLeave?: unknown; sickLeave?: unknown };
+  monthly_salary?: unknown;
+}
+
+const safeJson = async (res: Response | null): Promise<SafeJson | null> => {
   try {
     return res ? await res.json() : null;
   } catch {
@@ -185,6 +197,9 @@ function SignLine({ name, caption }: { name?: string; caption: string }) {
 export default function PrintableLeaveForm({
   applicationId,
   showPrintButton = true,
+  autoPrint = false,
+  printOnly = false,
+  onDone,
 }: PrintableLeaveFormProps) {
   const [application, setApplication] = useState<LeaveApplication | null>(null);
   const [trail, setTrail] = useState<ApprovalTrailEntry[]>([]);
@@ -246,8 +261,30 @@ export default function PrintableLeaveForm({
     };
 
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applicationId]);
+
+  // Auto-print once, in this same tab, as soon as the form is ready.
+  const printedRef = useRef(false);
+  useEffect(() => {
+    if (!autoPrint || isLoading) return;
+    if (error || !application) {
+      onDone?.();
+      return;
+    }
+    if (printedRef.current) return;
+    const t = setTimeout(() => {
+      if (printedRef.current) return;
+      printedRef.current = true;
+      window.print(); // blocks until the print dialog is closed
+      onDone?.();
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPrint, isLoading, error, application]);
+
+  if (printOnly && (isLoading || error || !application)) {
+    return null;
+  }
 
   if (isLoading) {
     return (
@@ -544,7 +581,7 @@ export default function PrintableLeaveForm({
     <div id="printable-leave-form-root">
       <style>{PRINT_CSS}</style>
 
-      {showPrintButton && (
+      {showPrintButton && !printOnly && (
         <div className="flex justify-end mb-4">
           <Button onClick={() => window.print()}>
             <Printer className="mr-2 h-4 w-4" />
@@ -554,7 +591,9 @@ export default function PrintableLeaveForm({
       )}
 
       {/* On-screen preview */}
-      <div className="rounded-lg border bg-white p-4 shadow-sm overflow-x-auto">{formBody}</div>
+      {!printOnly && (
+        <div className="rounded-lg border bg-white p-4 shadow-sm overflow-x-auto">{formBody}</div>
+      )}
 
       {/* Print-only copy, attached straight to <body> so printing never depends on
           the side panel / dialog this component is shown in. */}
