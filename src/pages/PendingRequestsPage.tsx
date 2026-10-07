@@ -107,6 +107,16 @@ const formatCurrency = (amount: number): string => {
   }).format(amount);
 };
 
+/** "day" for exactly 1, otherwise "days". */
+const dayWord = (n: number): string => (n === 1 ? 'day' : 'days');
+
+/** Turns the stored location value into a readable label for HR. */
+const formatLeaveLocation = (loc?: string | null): string => {
+  if (loc === 'within_ph') return 'Within the Philippines';
+  if (loc === 'abroad') return 'Abroad';
+  return loc || 'N/A';
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 const FILE_BASE_URL = API_BASE_URL.replace(/\/api$/, '');
 
@@ -582,10 +592,14 @@ export default function PendingRequestsPage() {
             const slDays = Number(viewRequest.monetization_sl_days) || 0;
             const hasSalary = monthlySalary > 0;
             const cashValue = computeMonetizationValue(monthlySalary, monetizedDays);
-            // Legacy rows (no VL/SL split) fall back to the leave type's name.
-            const creditLabel = isCombined
-              ? [vlDays > 0 ? `${vlDays} VL` : '', slDays > 0 ? `${slDays} SL` : ''].filter(Boolean).join(' + ') + ' leave credits'
-              : viewRequest.leave_type;
+            // What the employee wants converted, in plain words. Legacy rows (no VL/SL
+            // split) fall back to the leave type's name.
+            const creditSummary = isCombined
+              ? [
+                  vlDays > 0 ? `${vlDays} ${dayWord(vlDays)} of vacation leave (VL) credits` : '',
+                  slDays > 0 ? `${slDays} ${dayWord(slDays)} of sick leave (SL) credits` : '',
+                ].filter(Boolean).join(' and ')
+              : `${monetizedDays} ${dayWord(monetizedDays)} of ${viewRequest.leave_type}`;
 
             return (
               <div className="space-y-4">
@@ -631,7 +645,7 @@ export default function PendingRequestsPage() {
                       </div>
                       <div>
                         <Label className="text-muted-foreground">Location</Label>
-                        <p className="font-medium">{viewRequest.leave_location || 'N/A'}</p>
+                        <p className="font-medium">{formatLeaveLocation(viewRequest.leave_location)}</p>
                       </div>
                     </>
                   )}
@@ -680,7 +694,7 @@ export default function PendingRequestsPage() {
                           </div>
                           <div>
                             <p className="text-green-700 dark:text-green-300">Days to Monetize</p>
-                            <p className="font-bold text-green-900 dark:text-green-100">{monetizedDays} days</p>
+                            <p className="font-bold text-green-900 dark:text-green-100">{monetizedDays} {dayWord(monetizedDays)}</p>
                           </div>
                           {isCombined && (
                             <div>
@@ -715,7 +729,7 @@ export default function PendingRequestsPage() {
                           Monetization Request Summary
                         </p>
                         <p className="text-sm text-amber-800 dark:text-amber-200">
-                          This employee is requesting to convert {monetizedDays} day(s) of {creditLabel}
+                          This employee is requesting to convert {creditSummary}
                           {viewRequest.monetize_credits && ' for cash payment'}
                           {viewRequest.monetize_credits && viewRequest.commutation_requested && ' and '}
                           {viewRequest.commutation_requested && ' with commutation'}.
