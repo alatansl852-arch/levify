@@ -1,13 +1,62 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Loader2, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
+// ---------------------------------------------------------------------------
+// Edit these to change the printed letterhead and the signature block.
+// ---------------------------------------------------------------------------
+const LETTERHEAD_LINES = ['Republic of the Philippines', 'MINDANAO STATE UNIVERSITY', 'Marawi City'];
+// Name printed above the signature line. Leave '' to print a blank line for hand-writing.
+const SIGNATORY_NAME = '';
+const SIGNATORY_TITLE = 'President';
+
+// Leave types listed on the CSC form (item 6.A). A leave type that matches none
+// of these is written on the "Others" line.
+const LEAVE_TYPE_OPTIONS: { label: string; match: string[] }[] = [
+  { label: 'Vacation Leave', match: ['vacation'] },
+  { label: 'Mandatory/Forced Leave', match: ['mandatory', 'forced'] },
+  { label: 'Sick Leave', match: ['sick'] },
+  { label: 'Maternity Leave', match: ['maternity'] },
+  { label: 'Paternity Leave', match: ['paternity'] },
+  { label: 'Special Privilege Leave', match: ['special privilege'] },
+  { label: 'Solo Parent Leave', match: ['solo parent'] },
+  { label: 'Study Leave', match: ['study'] },
+  { label: '10-Day VAWC Leave', match: ['vawc'] },
+  { label: 'Rehabilitation Privilege', match: ['rehabilitation'] },
+  { label: 'Special Emergency (Calamity) Leave', match: ['special emergency', 'calamity'] },
+  { label: 'Adoption Leave', match: ['adoption'] },
+];
+
+// ---------------------------------------------------------------------------
+// Print CSS. The form is printed from its own copy attached directly to <body>
+// (see the portal below), and everything else on the page is hidden while
+// printing. This is what makes printing work from inside the side panel/dialog,
+// which used to print as a blank page.
+// ---------------------------------------------------------------------------
+const PRINT_CSS = `
+  @media screen {
+    #leave-form-print-portal { display: none; }
+  }
+  @media print {
+    @page { margin: 10mm; }
+    html, body { background: #fff !important; }
+    body > *:not(#leave-form-print-portal) { display: none !important; }
+    #leave-form-print-portal { display: block !important; }
+  }
+`;
+
+const exactColor = {
+  WebkitPrintColorAdjust: 'exact',
+  printColorAdjust: 'exact',
+} as React.CSSProperties;
+
 interface ApprovalTrailEntry {
   approver_role: string;
   action: string;
-  remarks?: string;
+  remarks?: string | null;
   created_at: string;
   approver_name: string;
 }
@@ -20,13 +69,21 @@ interface LeaveApplication {
   position: string;
   application_number: string;
   leave_type: string;
+  leave_location?: string | null;
   start_date: string;
   end_date: string;
-  days_count: number;
+  // Postgres NUMERIC comes back as a string (e.g. "4.00"), so never add it directly.
+  days_count: number | string;
+  reason?: string | null;
   status: string;
-  hr_remarks?: string;
-  ovcaa_remarks?: string;
-  ovcaf_remarks?: string;
+  created_at: string;
+  monetize_credits?: boolean | string | number | null;
+  commutation_requested?: boolean | string | number | null;
+  monetization_vl_days?: number | string | null;
+  monetization_sl_days?: number | string | null;
+  hr_remarks?: string | null;
+  ovcaa_remarks?: string | null;
+  ovcaf_remarks?: string | null;
 }
 
 interface Balance {
@@ -41,6 +98,90 @@ interface PrintableLeaveFormProps {
   showPrintButton?: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+const toNum = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const isTrue = (v: unknown): boolean =>
+  v === true || v === 't' || v === 'true' || v === '1' || v === 1;
+
+const fmtDays = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(2));
+
+const formatDate = (dateString?: string | null): string => {
+  if (!dateString) return '';
+  const d = new Date(dateString);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+const formatPeso = (amount: number): string =>
+  new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    minimumFractionDigits: 2,
+  }).format(amount);
+
+const safeJson = async (res: Response | null): Promise<any> => {
+  try {
+    return res ? await res.json() : null;
+  } catch {
+    return null;
+  }
+};
+
+// A labelled box on the form (e.g. "1. OFFICE/DEPARTMENT")
+function Field({
+  label,
+  children,
+  className = '',
+}: {
+  label: string;
+  children?: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`p-1.5 ${className}`}>
+      <p className="text-[9px] font-semibold uppercase">{label}</p>
+      <div className="font-semibold min-h-[16px]">{children}</div>
+    </div>
+  );
+}
+
+// A checkbox with a label
+function Check({ checked, children }: { checked?: boolean; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-1.5 py-[1px]">
+      <span className="inline-flex items-center justify-center shrink-0 w-3.5 h-3.5 mt-[1px] border border-black text-[10px] leading-none font-bold">
+        {checked ? '✓' : ''}
+      </span>
+      <span>{children}</span>
+    </div>
+  );
+}
+
+// An underlined blank that can hold text
+function Line({ children, minWidth = 90 }: { children?: React.ReactNode; minWidth?: number }) {
+  return (
+    <span className="inline-block border-b border-black px-1 align-bottom" style={{ minWidth }}>
+      {children}
+      {' '}
+    </span>
+  );
+}
+
+function SignLine({ name, caption }: { name?: string; caption: string }) {
+  return (
+    <div className="mt-7 text-center">
+      <p className="font-semibold uppercase min-h-[16px]">{name || ' '}</p>
+      <div className="border-t border-black mx-3 pt-0.5 text-[10px]">{caption}</div>
+    </div>
+  );
+}
+
 export default function PrintableLeaveForm({
   applicationId,
   showPrintButton = true,
@@ -48,6 +189,7 @@ export default function PrintableLeaveForm({
   const [application, setApplication] = useState<LeaveApplication | null>(null);
   const [trail, setTrail] = useState<ApprovalTrailEntry[]>([]);
   const [balance, setBalance] = useState<Balance | null>(null);
+  const [salary, setSalary] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,19 +214,25 @@ export default function PrintableLeaveForm({
         const detailsData = await detailsRes.json();
 
         if (detailsData.success) {
-          setApplication(detailsData.application);
+          const app: LeaveApplication = detailsData.application;
+          setApplication(app);
           setTrail(detailsData.history || []);
 
-          const balRes = await fetch(
-            `${API_BASE_URL}/leave/balance/${detailsData.application.employee_id}`,
-            { headers: getHeaders() }
-          );
-          const balData = await balRes.json();
-          if (balData.success) {
+          // Leave credits + monthly salary. Either may fail without breaking the form.
+          const [balRes, salRes] = await Promise.all([
+            fetch(`${API_BASE_URL}/leave/balance/${app.employee_id}`, { headers: getHeaders() }).catch(() => null),
+            fetch(`${API_BASE_URL}/leave/salary/${app.employee_id}`, { headers: getHeaders() }).catch(() => null),
+          ]);
+          const balData = await safeJson(balRes);
+          if (balData?.success && balData.balance) {
             setBalance({
-              vacationLeave: balData.balance.vacationLeave,
-              sickLeave: balData.balance.sickLeave,
+              vacationLeave: toNum(balData.balance.vacationLeave),
+              sickLeave: toNum(balData.balance.sickLeave),
             });
+          }
+          const salData = await safeJson(salRes);
+          if (salData?.success && toNum(salData.monthly_salary) > 0) {
+            setSalary(toNum(salData.monthly_salary));
           }
         } else {
           setError(detailsData.message || 'Application not found.');
@@ -98,40 +246,8 @@ export default function PrintableLeaveForm({
     };
 
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applicationId]);
-
-  const formatDate = (dateString?: string) => {
-    if (!dateString) return '';
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  };
-
-  const findApprover = (role: string) => trail.find((t) => t.approver_role === role);
-
-  // Note: current balance already reflects this application's deduction (it was
-  // approved before this loads). "Total Earned" is reconstructed as current
-  // balance + this application's days, ONLY for whichever leave type (VL or SL)
-  // this application actually drew from. This is an approximation for display
-  // purposes, not a new source of truth — the database balance fields remain
-  // authoritative.
-  const isVacation = application?.leave_type?.toLowerCase().includes('vacation');
-  const isSick = application?.leave_type?.toLowerCase().includes('sick');
-  const days = application?.days_count || 0;
-
-  const vlEarned = (balance?.vacationLeave || 0) + (isVacation ? days : 0);
-  const vlLess = isVacation ? days : 0;
-  const vlBalance = balance?.vacationLeave || 0;
-
-  const slEarned = (balance?.sickLeave || 0) + (isSick ? days : 0);
-  const slLess = isSick ? days : 0;
-  const slBalance = balance?.sickLeave || 0;
-
-  const hrEntry = findApprover('hr');
-  const ovcaaEntry = findApprover('ovcaa');
-  const ovcafEntry = findApprover('ovcaf');
 
   if (isLoading) {
     return (
@@ -149,10 +265,287 @@ export default function PrintableLeaveForm({
     );
   }
 
+  // -------------------------------------------------------------------------
+  // Derived values
+  // -------------------------------------------------------------------------
+  const findApprover = (role: string) => trail.find((t) => t.approver_role === role);
+  const hrEntry = findApprover('hr');
+  const ovcaaEntry = findApprover('ovcaa');
+  const ovcafEntry = findApprover('ovcaf');
+
+  const type = (application.leave_type || '').toLowerCase();
+  const days = toNum(application.days_count);
+  const isVacationType = type.includes('vacation');
+  const isSickType = type.includes('sick');
+  const monetized = isTrue(application.monetize_credits);
+  const commutation = isTrue(application.commutation_requested);
+  const status = application.status || '';
+  const isApproved = status === 'approved';
+  const isRejected = status.includes('rejected');
+
+  // Item 6.A — which leave type is checked
+  const matchedIndex = LEAVE_TYPE_OPTIONS.findIndex((o) => o.match.some((m) => type.includes(m)));
+  const othersText = matchedIndex === -1 ? application.leave_type : '';
+
+  // Item 6.B — location only applies to Vacation / Special Privilege Leave
+  const showLocation = isVacationType || type.includes('special privilege');
+  const withinPh = showLocation && application.leave_location === 'within_ph';
+  const abroad = showLocation && application.leave_location === 'abroad';
+
+  // Item 7.A — certification of leave credits.
+  // The database balance already reflects this application once it is fully
+  // approved, so "Total Earned" is rebuilt as current balance + what this
+  // application used. Before final approval the balance is not yet deducted, so
+  // the current balance is the total earned. (Display only — the database
+  // balance remains the source of truth.)
+  const monetVl = monetized ? toNum(application.monetization_vl_days) : 0;
+  const monetSl = monetized ? toNum(application.monetization_sl_days) : 0;
+  const vlUsed = (isVacationType ? days : 0) + monetVl;
+  const slUsed = (isSickType ? days : 0) + monetSl;
+  const alreadyDeducted = isApproved && !commutation;
+
+  const curVl = balance?.vacationLeave ?? 0;
+  const curSl = balance?.sickLeave ?? 0;
+  const vlEarned = alreadyDeducted ? curVl + vlUsed : curVl;
+  const slEarned = alreadyDeducted ? curSl + slUsed : curSl;
+  const vlBalance = alreadyDeducted ? curVl : Math.max(curVl - vlUsed, 0);
+  const slBalance = alreadyDeducted ? curSl : Math.max(curSl - slUsed, 0);
+  const creditsKnown = balance !== null;
+  const credit = (n: number) => (creditsKnown ? n.toFixed(2) : '');
+  const usedCell = (n: number) => (n > 0 ? n.toFixed(2) : '-');
+
+  // Items 7.C / 7.D
+  const rejectedEntry = trail.find((t) => t.action === 'rejected');
+  const disapprovalReason = isRejected
+    ? rejectedEntry?.remarks || application.ovcaf_remarks || application.ovcaa_remarks || application.hr_remarks || ''
+    : '';
+
+  const processedBy = [
+    hrEntry ? `HR: ${hrEntry.approver_name} (${formatDate(hrEntry.created_at)})` : '',
+    ovcaaEntry ? `OVCAA: ${ovcaaEntry.approver_name} (${formatDate(ovcaaEntry.created_at)})` : '',
+    ovcafEntry ? `OVCAF: ${ovcafEntry.approver_name} (${formatDate(ovcafEntry.created_at)})` : '',
+  ].filter(Boolean);
+
+  // -------------------------------------------------------------------------
+  // The form itself (CSC Form No. 6). Rendered once for the on-screen preview
+  // and once, hidden, in the print-only copy below.
+  // -------------------------------------------------------------------------
+  const formBody = (
+    <div className="bg-white text-black text-[11px] leading-snug">
+      <div className="flex justify-between items-start text-[10px] mb-1">
+        <div>
+          <p className="font-bold">Civil Service Form No. 6</p>
+          <p>Revised 2020</p>
+        </div>
+        <p className="text-right">
+          Application No. <span className="font-semibold">{application.application_number}</span>
+        </p>
+      </div>
+
+      <div className="text-center mb-2">
+        {LETTERHEAD_LINES.map((line, i) => (
+          <p key={i} className={i === 1 ? 'font-bold' : 'text-[10px]'}>{line}</p>
+        ))}
+        <p className="text-base font-bold tracking-wide mt-1">APPLICATION FOR LEAVE</p>
+      </div>
+
+      <div className="border border-black">
+        {/* 1 – 2 */}
+        <div className="grid grid-cols-2">
+          <Field label="1. Office / Department">{application.department}</Field>
+          <Field label="2. Name" className="border-l border-black">
+            {(application.employee_name || '').toUpperCase()}
+          </Field>
+        </div>
+
+        {/* 3 – 5 */}
+        <div className="grid grid-cols-3 border-t border-black">
+          <Field label="3. Date of Filing">{formatDate(application.created_at)}</Field>
+          <Field label="4. Position" className="border-l border-black">{application.position}</Field>
+          <Field label="5. Salary" className="border-l border-black">
+            {salary ? formatPeso(salary) : ''}
+          </Field>
+        </div>
+
+        {/* 6 */}
+        <div
+          className="border-t border-black bg-gray-100 text-center font-bold py-0.5"
+          style={exactColor}
+        >
+          6. DETAILS OF APPLICATION
+        </div>
+
+        <div className="grid grid-cols-2 border-t border-black">
+          {/* 6.A */}
+          <div className="p-1.5">
+            <p className="font-semibold mb-1">6.A TYPE OF LEAVE TO BE AVAILED OF</p>
+            {LEAVE_TYPE_OPTIONS.map((o, i) => (
+              <Check key={o.label} checked={matchedIndex === i}>{o.label}</Check>
+            ))}
+            <Check checked={matchedIndex === -1}>
+              Others (Specify): <Line minWidth={110}>{othersText}</Line>
+            </Check>
+          </div>
+
+          {/* 6.B */}
+          <div className="p-1.5 border-l border-black">
+            <p className="font-semibold mb-1">6.B DETAILS OF LEAVE</p>
+
+            <p className="italic text-[10px]">In case of Vacation/Special Privilege Leave:</p>
+            <Check checked={withinPh}>Within the Philippines</Check>
+            <Check checked={abroad}>Abroad (Specify) <Line minWidth={90} /></Check>
+
+            <p className="italic text-[10px] mt-1.5">In case of Sick Leave:</p>
+            <Check>In Hospital (Specify Illness) <Line minWidth={60} /></Check>
+            <Check>Out Patient (Specify Illness) <Line minWidth={60} /></Check>
+
+            <p className="italic text-[10px] mt-1.5">In case of Study Leave:</p>
+            <Check>Completion of Master&apos;s Degree</Check>
+            <Check>BAR/Board Examination Review</Check>
+
+            <p className="italic text-[10px] mt-1.5">Other purpose:</p>
+            <Check checked={monetized}>Monetization of Leave Credits</Check>
+            <Check checked={type.includes('terminal')}>Terminal Leave</Check>
+
+            {application.reason ? (
+              <p className="mt-1.5">
+                <span className="font-semibold">Reason: </span>
+                {application.reason}
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 border-t border-black">
+          {/* 6.C */}
+          <div className="p-1.5">
+            <p className="font-semibold mb-1">6.C NUMBER OF WORKING DAYS APPLIED FOR</p>
+            <p className="font-semibold">
+              <Line minWidth={110}>{fmtDays(days)}</Line>
+            </p>
+            <p className="font-semibold mt-1.5">INCLUSIVE DATES</p>
+            <p className="font-semibold">
+              <Line minWidth={180}>
+                {formatDate(application.start_date)} – {formatDate(application.end_date)}
+              </Line>
+            </p>
+          </div>
+
+          {/* 6.D */}
+          <div className="p-1.5 border-l border-black">
+            <p className="font-semibold mb-1">6.D COMMUTATION</p>
+            <Check checked={!commutation}>Not Requested</Check>
+            <Check checked={commutation}>Requested</Check>
+            <SignLine caption="(Signature of Applicant)" />
+          </div>
+        </div>
+
+        {/* 7 */}
+        <div
+          className="border-t border-black bg-gray-100 text-center font-bold py-0.5"
+          style={exactColor}
+        >
+          7. DETAILS OF ACTION ON APPLICATION
+        </div>
+
+        <div className="grid grid-cols-2 border-t border-black">
+          {/* 7.A */}
+          <div className="p-1.5">
+            <p className="font-semibold mb-0.5">7.A CERTIFICATION OF LEAVE CREDITS</p>
+            <p className="text-[10px] mb-1">As of {formatDate(new Date().toISOString())}</p>
+            <table className="w-full border-collapse text-center text-[10px]">
+              <thead>
+                <tr>
+                  <th className="border border-black p-0.5"></th>
+                  <th className="border border-black p-0.5 font-semibold">Vacation Leave</th>
+                  <th className="border border-black p-0.5 font-semibold">Sick Leave</th>
+                  <th className="border border-black p-0.5 font-semibold">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="border border-black p-0.5 text-left">Total Earned</td>
+                  <td className="border border-black p-0.5">{credit(vlEarned)}</td>
+                  <td className="border border-black p-0.5">{credit(slEarned)}</td>
+                  <td className="border border-black p-0.5">{credit(vlEarned + slEarned)}</td>
+                </tr>
+                <tr>
+                  <td className="border border-black p-0.5 text-left">Less this application</td>
+                  <td className="border border-black p-0.5">{usedCell(vlUsed)}</td>
+                  <td className="border border-black p-0.5">{usedCell(slUsed)}</td>
+                  <td className="border border-black p-0.5">{usedCell(vlUsed + slUsed)}</td>
+                </tr>
+                <tr>
+                  <td className="border border-black p-0.5 text-left font-semibold">Balance</td>
+                  <td className="border border-black p-0.5 font-semibold">{credit(vlBalance)}</td>
+                  <td className="border border-black p-0.5 font-semibold">{credit(slBalance)}</td>
+                  <td className="border border-black p-0.5 font-semibold">{credit(vlBalance + slBalance)}</td>
+                </tr>
+              </tbody>
+            </table>
+            <SignLine name={hrEntry?.approver_name} caption="(Authorized Officer — HR)" />
+          </div>
+
+          {/* 7.B */}
+          <div className="p-1.5 border-l border-black">
+            <p className="font-semibold mb-1">7.B RECOMMENDATION</p>
+            <Check checked={ovcaaEntry?.action === 'approved'}>For approval</Check>
+            <Check checked={ovcaaEntry?.action === 'rejected'}>
+              For disapproval due to{' '}
+              <Line minWidth={110}>{ovcaaEntry?.action === 'rejected' ? ovcaaEntry.remarks : ''}</Line>
+            </Check>
+            <SignLine name={ovcaaEntry?.approver_name} caption="(Authorized Officer — OVCAA)" />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 border-t border-black">
+          {/* 7.C */}
+          <div className="p-1.5">
+            <p className="font-semibold mb-1">7.C APPROVED FOR:</p>
+            <div className="py-[1px]">
+              <Line minWidth={40}>{isApproved ? fmtDays(days) : ''}</Line> days with pay
+            </div>
+            <div className="py-[1px]">
+              <Line minWidth={40} /> days without pay
+            </div>
+            <div className="py-[1px]">
+              <Line minWidth={40} /> others (Specify) <Line minWidth={70} />
+            </div>
+          </div>
+
+          {/* 7.D */}
+          <div className="p-1.5 border-l border-black">
+            <p className="font-semibold mb-1">7.D DISAPPROVED DUE TO:</p>
+            <div className="border-b border-black min-h-[16px] px-1">{disapprovalReason}</div>
+            <div className="border-b border-black min-h-[16px] mt-1">{' '}</div>
+          </div>
+        </div>
+
+        {/* Final signature — President / authorized official */}
+        <div className="border-t border-black p-1.5">
+          <div className="mx-auto w-72">
+            <SignLine
+              name={SIGNATORY_NAME}
+              caption={`(${SIGNATORY_TITLE} / Authorized Official)`}
+            />
+          </div>
+        </div>
+      </div>
+
+      {processedBy.length > 0 && (
+        <p className="mt-1.5 text-[9px] text-gray-600">
+          Processed in LEVIFY — {processedBy.join(' · ')}
+        </p>
+      )}
+    </div>
+  );
+
   return (
     <div id="printable-leave-form-root">
+      <style>{PRINT_CSS}</style>
+
       {showPrintButton && (
-        <div className="flex justify-end mb-4 print:hidden">
+        <div className="flex justify-end mb-4">
           <Button onClick={() => window.print()}>
             <Printer className="mr-2 h-4 w-4" />
             Print
@@ -160,108 +553,12 @@ export default function PrintableLeaveForm({
         </div>
       )}
 
-      {/* Printable form */}
-      <div className="bg-white text-black p-6 shadow-sm print:shadow-none print:p-0 text-sm rounded-lg border print:border-none">
-        <div className="text-center mb-6 space-y-1">
-          <p className="font-bold uppercase">Civil Service Commission</p>
-          <p className="font-semibold">Application for Leave</p>
-          <p className="text-xs">Application No. {application.application_number}</p>
-        </div>
+      {/* On-screen preview */}
+      <div className="rounded-lg border bg-white p-4 shadow-sm overflow-x-auto">{formBody}</div>
 
-        <div className="grid grid-cols-2 gap-2 mb-4 border-y py-2">
-          <p><span className="text-muted-foreground">Employee:</span> {application.employee_name}</p>
-          <p><span className="text-muted-foreground">Department:</span> {application.department}</p>
-          <p><span className="text-muted-foreground">Position:</span> {application.position}</p>
-          <p><span className="text-muted-foreground">Leave Type:</span> {application.leave_type}</p>
-          <p><span className="text-muted-foreground">Inclusive Dates:</span> {formatDate(application.start_date)} - {formatDate(application.end_date)}</p>
-          <p><span className="text-muted-foreground">Days:</span> {application.days_count}</p>
-        </div>
-
-        <p className="font-bold mb-2">7. DETAILS OF ACTION ON APPLICATION</p>
-
-        {/* 7.A Certification of Leave Credits */}
-        <div className="border p-3 mb-3">
-          <p className="font-semibold mb-2">7.A CERTIFICATION OF LEAVE CREDITS</p>
-          <p className="text-xs mb-2">As of {formatDate(new Date().toISOString())}</p>
-          <table className="w-full border-collapse text-center">
-            <thead>
-              <tr>
-                <td className="border p-1"></td>
-                <td className="border p-1 font-medium">Vacation Leave</td>
-                <td className="border p-1 font-medium">Sick Leave</td>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="border p-1 text-left">Total Earned</td>
-                <td className="border p-1">{vlEarned.toFixed(2)}</td>
-                <td className="border p-1">{slEarned.toFixed(2)}</td>
-              </tr>
-              <tr>
-                <td className="border p-1 text-left">Less this application</td>
-                <td className="border p-1">{vlLess > 0 ? vlLess.toFixed(2) : '-'}</td>
-                <td className="border p-1">{slLess > 0 ? slLess.toFixed(2) : '-'}</td>
-              </tr>
-              <tr>
-                <td className="border p-1 text-left font-medium">Balance</td>
-                <td className="border p-1 font-medium">{vlBalance.toFixed(2)}</td>
-                <td className="border p-1 font-medium">{slBalance.toFixed(2)}</td>
-              </tr>
-            </tbody>
-          </table>
-          <div className="flex justify-between items-end mt-6">
-            <div className="border-t border-black w-56 pt-1 text-center">
-              {hrEntry?.approver_name || '\u00A0'}
-              <p className="text-xs">Authorized Officer (HR)</p>
-            </div>
-          </div>
-        </div>
-
-        {/* 7.B Recommendation */}
-        <div className="border p-3 mb-3">
-          <p className="font-semibold mb-2">7.B RECOMMENDATION</p>
-          <p>
-            <span className="inline-block w-4 h-4 border border-black mr-2 align-middle">
-              {ovcaaEntry?.action === 'approved' ? '✓' : ''}
-            </span>
-            For approval
-          </p>
-          <p className="mt-1">
-            <span className="inline-block w-4 h-4 border border-black mr-2 align-middle">
-              {ovcaaEntry?.action === 'rejected' ? '✓' : ''}
-            </span>
-            For disapproval due to {ovcaaEntry?.action === 'rejected' ? ovcaaEntry.remarks : '_______________________'}
-          </p>
-          <div className="flex justify-between items-end mt-6">
-            <div className="border-t border-black w-56 pt-1 text-center">
-              {ovcaaEntry?.approver_name || '\u00A0'}
-              <p className="text-xs">Authorized Officer (OVCAA)</p>
-            </div>
-          </div>
-        </div>
-
-        {/* 7.C / 7.D Approved / Disapproved */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="border p-3">
-            <p className="font-semibold mb-2">7.C APPROVED FOR:</p>
-            <p>____ days with pay</p>
-            <p className="mt-1">____ days without pay</p>
-            <p className="mt-1">____ others (Specify) ______________</p>
-            <div className="mt-8 border-t border-black pt-1 text-center">
-              {application.status === 'approved' ? ovcafEntry?.approver_name || '\u00A0' : '\u00A0'}
-              <p className="text-xs">Authorized Officer (OVCAF)</p>
-            </div>
-          </div>
-          <div className="border p-3">
-            <p className="font-semibold mb-2">7.D DISAPPROVED DUE TO:</p>
-            <p>{application.status.includes('rejected') ? (application.ovcaf_remarks || application.ovcaa_remarks || application.hr_remarks) : '\u00A0'}</p>
-            <div className="mt-8 border-t border-black pt-1 text-center">
-              {application.status.includes('rejected') ? ovcafEntry?.approver_name || '\u00A0' : '\u00A0'}
-              <p className="text-xs">Authorized Officer</p>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Print-only copy, attached straight to <body> so printing never depends on
+          the side panel / dialog this component is shown in. */}
+      {createPortal(<div id="leave-form-print-portal">{formBody}</div>, document.body)}
     </div>
   );
 }
