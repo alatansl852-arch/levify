@@ -29,7 +29,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import {
-  Users, Search, Eye, Filter, Download, Mail, Building2, Briefcase,
+  Users, Search, Eye, Filter, Mail, Building2, Briefcase,
   CalendarCheck, CalendarX, BookOpen, MinusCircle, Award,
 } from 'lucide-react';
 
@@ -151,12 +151,7 @@ export default function EmployeesPage() {
       <PageHeader
         title={getPageTitle()}
         description={getPageDescription()}
-      >
-        <Button variant="outline">
-          <Download className="mr-2 h-4 w-4" />
-          Export
-        </Button>
-      </PageHeader>
+      />
 
       <Card>
         <CardHeader>
