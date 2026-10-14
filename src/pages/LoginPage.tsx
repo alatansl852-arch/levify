@@ -91,12 +91,6 @@ export default function LoginPage() {
             Main Campus, Marawi City
           </p>
         </div>
-
-        <div className="absolute bottom-8 left-8 right-8 text-center">
-          <p className="text-primary-foreground/60 text-sm">
-            Developed by: Schultz Jay L. Alatan &amp; Jalilah S. Cader
-          </p>
-        </div>
       </div>
 
       {/* ── Right side - Login form ──────────────────────────────────────── */}
