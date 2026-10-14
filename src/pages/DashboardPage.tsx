@@ -30,12 +30,47 @@ const MAROON = '#7b1325';
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+// A leave filed together with monetization and/or commutation. The backend serves
+// these from /leave/monetization/:role, separate from the regular /leave/pending/:role.
 interface MonetizationRequest {
   id: number;
   employee_name: string;
-  days_count: number;
+  department?: string;
+  leave_type?: string;
+  start_date?: string;
+  end_date?: string;
+  days_count: number | string;
+  monetization_days?: number | string | null;
   status: LeaveStatus;
 }
+
+// ✅ Shared helper: fetches the monetization / commutation queue for a role.
+// Regular pending requests and monetization requests live on two different
+// backend routes, so every approver dashboard needs to read both.
+function useMonetizationQueue(role: 'hr' | 'ovcaa' | 'ovcaf') {
+  const [list, setList] = useState<MonetizationRequest[]>([]);
+
+  useEffect(() => {
+    const token = localStorage.getItem('levify_token');
+    fetch(`${API_BASE_URL}/leave/monetization/${role}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) setList(data.applications);
+      })
+      .catch((err) => console.error(`❌ Failed to fetch ${role} monetization requests:`, err));
+  }, [role]);
+
+  return list;
+}
+
+// Days that are actually being monetized. A leave filed together with monetization
+// carries its own monetization_days; older rows fall back to days_count.
+const getMonetizedDays = (r: MonetizationRequest): number => {
+  const md = Number(r.monetization_days);
+  return md > 0 ? md : Number(r.days_count) || 0;
+};
 
 // ✅ Hook now tracks used and monetized separately (backend split)
 function useLiveBalance(employeeId: string | undefined) {
@@ -208,12 +243,17 @@ function HRDashboard() {
     isLoadingAll,
   } = useLeave();
 
+  // ✅ Monetization / commutation requests are on a separate backend route,
+  // so they are fetched here and added to the pending count.
+  const monetizationList = useMonetizationQueue('hr');
+
   useEffect(() => {
     refreshRequests();
     refreshAllRequests();
   }, [refreshRequests, refreshAllRequests]);
 
   const pendingRequests = getPendingRequests('hr') || [];
+  const totalPending = pendingRequests.length + monetizationList.length;
 
   const now = new Date();
   const approvedThisMonth = allRequests.filter((r) => {
@@ -254,9 +294,9 @@ function HRDashboard() {
 
       {/* Compact stat cards */}
       <div className="grid gap-3 md:grid-cols-3">
-        <CompactStat title="Pending Requests"    value={pendingRequests.length} description="awaiting HR review" />
-        <CompactStat title="Total Employees"     value={200}                    description="faculty and staff" />
-        <CompactStat title="Approved This Month" value={approvedThisMonth}      description="leave requests" />
+        <CompactStat title="Pending Requests"    value={totalPending}      description="awaiting HR review" />
+        <CompactStat title="Total Employees"     value={200}               description="faculty and staff" />
+        <CompactStat title="Approved This Month" value={approvedThisMonth} description="leave requests" />
       </div>
 
       {/* Graph: Monthly Leave Requests */}
@@ -344,14 +384,20 @@ function HRDashboard() {
 function OVCAADashboard() {
   const { getPendingRequests, allRequests, refreshRequests, refreshAllRequests } = useLeave();
 
+  // ✅ This was the cause of the "0 HR-approved requests" bug: a leave filed with
+  // monetization / commutation is served by /leave/monetization/ovcaa, not by
+  // /leave/pending/ovcaa, so the dashboard never saw it.
+  const monetizationList = useMonetizationQueue('ovcaa');
+
   useEffect(() => {
     refreshRequests();
     refreshAllRequests();
   }, [refreshRequests, refreshAllRequests]);
 
-  const pendingRequests = getPendingRequests('ovcaa') || [];
-  const facultyRequests = pendingRequests.filter((r) => r.department?.includes('College')) || [];
+  const regularPending = getPendingRequests('ovcaa') || [];
+  const totalPending = regularPending.length + monetizationList.length;
 
+  // Requests OVCAA already endorsed (now with OVCAF, or fully approved)
   const endorsedCount = allRequests.filter(
     (r) => r.status === 'ovcaa_approved' || r.status === 'approved'
   ).length;
@@ -361,22 +407,22 @@ function OVCAADashboard() {
       <PageHeader title="OVCAA Dashboard" description="Office of the Vice Chancellor for Academic Affairs" />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <StatCard title="For Academic Review"    value={pendingRequests.length} description="HR-approved requests" variant="primary" />
-        <StatCard title="Faculty Leave Requests" value={facultyRequests.length} description="this month"           variant="primary" />
-        <StatCard title="Endorsed"               value={endorsedCount}          description="to OVCAF"            variant="primary" />
+        <StatCard title="For Academic Review"  value={totalPending}             description="HR-approved requests"   variant="primary" />
+        <StatCard title="With Monetization"    value={monetizationList.length}  description="monetization / commutation" variant="primary" />
+        <StatCard title="Endorsed"             value={endorsedCount}            description="to OVCAF"               variant="primary" />
       </div>
 
       <div className="mt-6">
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Pending Academic Review</CardTitle>
-            <CardDescription>Faculty leave requests requiring academic impact assessment</CardDescription>
+            <CardDescription>Leave requests requiring academic impact assessment</CardDescription>
           </CardHeader>
           <CardContent>
-            {pendingRequests.length > 0 ? (
+            {totalPending > 0 ? (
               <div className="space-y-3">
-                {pendingRequests.map((request) => (
-                  <div key={request.id} className="flex items-center justify-between rounded-lg border p-4">
+                {regularPending.map((request) => (
+                  <div key={`regular-${request.id}`} className="flex items-center justify-between rounded-lg border p-4">
                     <div>
                       <p className="font-medium">{request.employeeName}</p>
                       <p className="text-sm text-muted-foreground">{request.department}</p>
@@ -385,6 +431,25 @@ function OVCAADashboard() {
                       <p className="font-medium">{getLeaveTypeLabel(request.leaveType)}</p>
                       <p className="text-sm text-muted-foreground">
                         {formatDate(request.startDate)} - {formatDate(request.endDate)}
+                      </p>
+                    </div>
+                    <StatusBadge status={request.status} />
+                  </div>
+                ))}
+
+                {monetizationList.map((request) => (
+                  <div key={`monetization-${request.id}`} className="flex items-center justify-between rounded-lg border p-4">
+                    <div>
+                      <p className="font-medium">{request.employee_name}</p>
+                      <p className="text-sm text-muted-foreground">{request.department}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="font-medium">{request.leave_type}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {request.start_date && request.end_date
+                          ? `${formatDate(request.start_date)} - ${formatDate(request.end_date)}`
+                          : `${getMonetizedDays(request)} days`}
+                        {' · with monetization / commutation'}
                       </p>
                     </div>
                     <StatusBadge status={request.status} />
@@ -403,28 +468,17 @@ function OVCAADashboard() {
 
 function OVCAFDashboard() {
   const { getPendingRequests, allRequests, refreshRequests, refreshAllRequests } = useLeave();
-  const [monetizationCount, setMonetizationCount] = useState(0);
-  const [monetizationList, setMonetizationList] = useState<MonetizationRequest[]>([]);
+  const monetizationList = useMonetizationQueue('ovcaf');
 
   useEffect(() => {
     refreshRequests();
     refreshAllRequests();
-
-    const token = localStorage.getItem('levify_token');
-    fetch(`${API_BASE_URL}/leave/monetization/ovcaf`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success) {
-          setMonetizationCount(data.applications.length);
-          setMonetizationList(data.applications);
-        }
-      })
-      .catch((err) => console.error('❌ Failed to fetch monetization requests:', err));
   }, [refreshRequests, refreshAllRequests]);
 
   const pendingRequests = getPendingRequests('ovcaf') || [];
+
+  // ✅ "For Final Approval" now counts regular + monetization requests together
+  const totalForFinalApproval = pendingRequests.length + monetizationList.length;
 
   const now = new Date();
   const approvedThisMonth = allRequests.filter((r) => {
@@ -438,9 +492,9 @@ function OVCAFDashboard() {
       <PageHeader title="OVCAF Dashboard" description="Office of the Vice Chancellor for Administration and Finance" />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <StatCard title="For Final Approval"    value={pendingRequests.length} description="OVCAA-endorsed requests" variant="primary" />
-        <StatCard title="Monetization Requests" value={monetizationCount}      description="pending review"          variant="primary" />
-        <StatCard title="Approved"              value={approvedThisMonth}      description="this month"              variant="primary" />
+        <StatCard title="For Final Approval"    value={totalForFinalApproval}  description="OVCAA-endorsed requests" variant="primary" />
+        <StatCard title="Monetization Requests" value={monetizationList.length} description="pending review"          variant="primary" />
+        <StatCard title="Approved"              value={approvedThisMonth}       description="this month"              variant="primary" />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -481,7 +535,7 @@ function OVCAFDashboard() {
                     <div>
                       <p className="font-medium">{request.employee_name}</p>
                       <p className="text-sm text-muted-foreground">
-                        {request.days_count} days for monetization
+                        {getMonetizedDays(request)} days for monetization
                       </p>
                     </div>
                     <StatusBadge status={request.status} />
@@ -511,12 +565,17 @@ export default function DashboardPage() {
     );
   }
 
+  // Your users table stores regular employees with the role "employee", so that
+  // role is treated the same as staff / faculty here.
+  const role = user.role as string;
+  const isEmployee = role === 'staff' || role === 'faculty' || role === 'employee';
+
   return (
     <DashboardLayout>
-      {(user.role === 'staff' || user.role === 'faculty') && <EmployeeDashboard employeeId={user.employeeId} />}
-      {user.role === 'hr'    && <HRDashboard />}
-      {user.role === 'ovcaa' && <OVCAADashboard />}
-      {user.role === 'ovcaf' && <OVCAFDashboard />}
+      {isEmployee && <EmployeeDashboard employeeId={user.employeeId} />}
+      {role === 'hr'    && <HRDashboard />}
+      {role === 'ovcaa' && <OVCAADashboard />}
+      {role === 'ovcaf' && <OVCAFDashboard />}
     </DashboardLayout>
   );
 }
