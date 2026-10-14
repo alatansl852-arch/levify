@@ -3,11 +3,15 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { StatCard } from '@/components/ui/stat-card';
 import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import PrintableLeaveForm from '@/components/PrintableLeaveForm';
 import {
   ChevronDown,
   ChevronRight,
   Check,
   X,
+  Printer,
+  Loader2,
 } from 'lucide-react';
 
 interface Summary {
@@ -63,6 +67,8 @@ export default function AllRequestsPage() {
   });
   const [history, setHistory] = useState<LeaveHistoryItem[]>([]);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  // Id of the application whose leave form is currently being printed (null = none).
+  const [printingId, setPrintingId] = useState<number | null>(null);
 
   const getHeaders = useCallback(() => {
     const token = localStorage.getItem('authToken');
@@ -217,6 +223,8 @@ export default function AllRequestsPage() {
                       {history.map((item) => {
                         const isExpanded = expandedIds.has(item.id);
                         const statusInfo = getStatusInfo(item);
+                        const isFullyApproved = item.status === 'approved';
+                        const isPrintingThis = printingId === item.id;
                         return (
                           <React.Fragment key={item.id}>
                             <tr
@@ -276,6 +284,24 @@ export default function AllRequestsPage() {
                                       No approval action recorded yet — awaiting {ROLE_LABELS[item.current_approver || ''] || 'review'}.
                                     </p>
                                   )}
+
+                                  {/* Print button — only for fully approved requests */}
+                                  {isFullyApproved && (
+                                    <div className="flex justify-end mt-4">
+                                      <Button
+                                        size="sm"
+                                        onClick={() => setPrintingId(item.id)}
+                                        disabled={printingId !== null}
+                                      >
+                                        {isPrintingThis ? (
+                                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        ) : (
+                                          <Printer className="mr-2 h-4 w-4" />
+                                        )}
+                                        {isPrintingThis ? 'Preparing...' : 'Print Leave Form'}
+                                      </Button>
+                                    </div>
+                                  )}
                                 </td>
                               </tr>
                             )}
@@ -293,6 +319,17 @@ export default function AllRequestsPage() {
             </CardContent>
           </Card>
         </>
+      )}
+
+      {/* Prints the CSC leave form in this same tab — loads the data, then opens
+          the print dialog by itself. Nothing is shown on screen. */}
+      {printingId !== null && (
+        <PrintableLeaveForm
+          applicationId={printingId}
+          autoPrint
+          printOnly
+          onDone={() => setPrintingId(null)}
+        />
       )}
     </DashboardLayout>
   );
