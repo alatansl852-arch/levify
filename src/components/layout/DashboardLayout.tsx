@@ -29,7 +29,7 @@ const getNavItems = (role: string): NavItem[] => {
     { label: 'Dashboard', href: '/dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
   ];
 
-  if (role === 'staff' || role === 'faculty') {
+  if (role === 'staff' || role === 'faculty' || role === 'employee') {
     return [
       ...baseItems,
       { label: 'Apply Leave', href: '/apply-leave', icon: <FileText className="h-5 w-5" /> },
@@ -53,7 +53,8 @@ const getNavItems = (role: string): NavItem[] => {
     return [
       ...baseItems,
       { label: 'For Review', href: '/pending-requests', icon: <FileText className="h-5 w-5" /> },
-      { label: 'Faculty Records', href: '/employees', icon: <Users className="h-5 w-5" /> },
+      // OVCAA sees staff records only (the page filters the list by role)
+      { label: 'Staff Records', href: '/employees', icon: <Users className="h-5 w-5" /> },
       { label: 'All Requests', href: '/all-requests', icon: <CheckCircle className="h-5 w-5" /> },
       { label: 'My Profile', href: '/profile', icon: <User className="h-5 w-5" /> },
     ];
@@ -63,6 +64,8 @@ const getNavItems = (role: string): NavItem[] => {
     return [
       ...baseItems,
       { label: 'For Approval', href: '/pending-requests', icon: <FileText className="h-5 w-5" /> },
+      // OVCAF sees faculty records only (the page filters the list by role)
+      { label: 'Faculty Records', href: '/employees', icon: <Users className="h-5 w-5" /> },
       { label: 'All Requests', href: '/all-requests', icon: <CheckCircle className="h-5 w-5" /> },
       { label: 'My Profile', href: '/profile', icon: <User className="h-5 w-5" /> },
     ];
@@ -90,12 +93,13 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   const getRoleLabel = (role: string) => {
     switch (role) {
-      case 'staff':   return 'Staff';
-      case 'faculty': return 'Faculty';
-      case 'hr':      return 'HR Personnel';
-      case 'ovcaa':   return 'OVCAA';
-      case 'ovcaf':   return 'OVCAF';
-      default:        return role;
+      case 'staff':    return 'Staff';
+      case 'faculty':  return 'Faculty';
+      case 'employee': return 'Employee';
+      case 'hr':       return 'HR Personnel';
+      case 'ovcaa':    return 'OVCAA';
+      case 'ovcaf':    return 'OVCAF';
+      default:         return role;
     }
   };
 
