@@ -36,7 +36,11 @@ const SelectScrollUpButton = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.ScrollUpButton
     ref={ref}
-    className={cn("flex cursor-default items-center justify-center py-1 bg-popover text-muted-foreground", className)}
+    className={cn(
+      // Solid background + stacking so list items never show through the arrow.
+      "relative z-20 flex shrink-0 cursor-default items-center justify-center bg-popover py-1 text-muted-foreground",
+      className,
+    )}
     {...props}
   >
     <ChevronUp className="h-4 w-4" />
@@ -50,7 +54,10 @@ const SelectScrollDownButton = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.ScrollDownButton
     ref={ref}
-    className={cn("flex cursor-default items-center justify-center py-1 bg-popover text-muted-foreground", className)}
+    className={cn(
+      "relative z-20 flex shrink-0 cursor-default items-center justify-center bg-popover py-1 text-muted-foreground",
+      className,
+    )}
     {...props}
   >
     <ChevronDown className="h-4 w-4" />
@@ -66,10 +73,6 @@ const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        // ✅ Was relying on default shadcn tokens alone; made the elevation and
-        // border explicit (border-2 + shadow-lg) so the panel reads as a distinct
-        // floating surface instead of blending into the page. Capped at 320px
-        // with an internal scroll instead of an unbounded list.
         "relative z-50 max-h-80 min-w-[--radix-select-trigger-width] overflow-hidden rounded-lg border-2 border-border bg-popover text-popover-foreground shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
         position === "popper" &&
           "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
@@ -81,7 +84,9 @@ const SelectContent = React.forwardRef<
       <SelectScrollUpButton />
       <SelectPrimitive.Viewport
         className={cn(
-          "p-1.5",
+          // FIX: no top padding. Padding above a sticky label leaves a gap that
+          // list items scroll through. Only side/bottom padding is kept.
+          "px-1.5 pb-1.5 pt-0",
           position === "popper" &&
             "w-full min-w-[var(--radix-select-trigger-width)]",
         )}
@@ -101,10 +106,9 @@ const SelectLabel = React.forwardRef<
   <SelectPrimitive.Label
     ref={ref}
     className={cn(
-      // ✅ Made group labels visually distinct (uppercase, tracked, gold accent
-      // tint) and pinned to the top of the scroll area so they act as section
-      // headers instead of plain small text mixed in with selectable rows.
-      "sticky top-0 z-10 -mx-1.5 mb-1 border-b border-border/60 bg-popover px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-secondary-foreground/70",
+      // Pinned flush to the top (top-0) with a solid background. The tiny
+      // shadow covers the 1px seam so nothing peeks through above the label.
+      "sticky top-0 z-10 -mx-1.5 mb-1 border-b border-border/60 bg-popover px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-secondary-foreground/70 shadow-[0_-1px_0_0_hsl(var(--popover))]",
       className,
     )}
     {...props}
@@ -119,9 +123,6 @@ const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      // ✅ Switched the selected/hover state from the generic gray "accent" to
-      // the theme's maroon primary at low opacity, so it visually matches the
-      // rest of Levify instead of looking like an unstyled default component.
       "relative flex w-full cursor-pointer select-none items-center rounded-md py-2 pl-8 pr-3 text-sm outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-primary/10 focus:text-primary data-[state=checked]:bg-primary/10 data-[state=checked]:font-medium data-[state=checked]:text-primary",
       className,
     )}
