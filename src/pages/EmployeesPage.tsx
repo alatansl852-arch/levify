@@ -89,12 +89,18 @@ export default function EmployeesPage() {
 
         // Filter based on user role
         if (user?.role === 'ovcaa') {
-          // OVCAA sees only faculty (teaching)
+          // OVCAA sees only staff (non-teaching). Accounts with no employee_type
+          // (HR / OVCAA / OVCAF) are excluded on purpose.
+          filteredEmployees = filteredEmployees.filter(
+            (emp: Employee) => emp.employee_type === 'non-teaching'
+          );
+        } else if (user?.role === 'ovcaf') {
+          // OVCAF sees only faculty (teaching)
           filteredEmployees = filteredEmployees.filter(
             (emp: Employee) => emp.employee_type === 'teaching'
           );
         }
-        // HR and OVCAF see all employees (no filtering needed)
+        // HR sees all employees (no filtering needed)
 
         setEmployees(filteredEmployees);
       }
@@ -125,12 +131,14 @@ export default function EmployeesPage() {
   const departments = [...new Set(employees.map((e) => e.department))].sort();
 
   const getPageTitle = () => {
-    if (user?.role === 'ovcaa') return 'Faculty Records';
+    if (user?.role === 'ovcaa') return 'Staff Records';
+    if (user?.role === 'ovcaf') return 'Faculty Records';
     return 'Employee Records';
   };
 
   const getPageDescription = () => {
-    if (user?.role === 'ovcaa') return 'View and manage faculty information and leave balances';
+    if (user?.role === 'ovcaa') return 'View and manage staff information and leave balances';
+    if (user?.role === 'ovcaf') return 'View and manage faculty information and leave balances';
     return 'View and manage employee information and leave balances';
   };
 
@@ -159,14 +167,22 @@ export default function EmployeesPage() {
             <div>
               <CardTitle className="text-lg flex items-center gap-2">
                 <Users className="h-5 w-5" />
-                {user?.role === 'ovcaa' ? 'Faculty Directory' : 'Employee Directory'}
+                {user?.role === 'ovcaa'
+                  ? 'Staff Directory'
+                  : user?.role === 'ovcaf'
+                  ? 'Faculty Directory'
+                  : 'Employee Directory'}
               </CardTitle>
               <CardDescription>
                 {isLoading ? (
                   'Loading employees...'
                 ) : (
                   `${filteredEmployees.length} of ${employees.length} ${
-                    user?.role === 'ovcaa' ? 'faculty members' : 'employees'
+                    user?.role === 'ovcaa'
+                      ? 'staff members'
+                      : user?.role === 'ovcaf'
+                      ? 'faculty members'
+                      : 'employees'
                   }`
                 )}
               </CardDescription>
@@ -182,8 +198,8 @@ export default function EmployeesPage() {
                 />
               </div>
               
-              {/* Show type filter only for HR and OVCAF (who see both staff and faculty) */}
-              {user?.role !== 'ovcaa' && (
+              {/* Show type filter only for HR (OVCAA sees only staff, OVCAF only faculty) */}
+              {user?.role !== 'ovcaa' && user?.role !== 'ovcaf' && (
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
                   <SelectTrigger className="w-[130px]">
                     <Filter className="mr-2 h-4 w-4" />
