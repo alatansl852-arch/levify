@@ -64,8 +64,8 @@ const getNavItems = (role: string): NavItem[] => {
     return [
       ...baseItems,
       { label: 'For Approval', href: '/pending-requests', icon: <FileText className="h-5 w-5" /> },
-      // OVCAF sees faculty records only (the page filters the list by role)
-      { label: 'Faculty Records', href: '/employees', icon: <Users className="h-5 w-5" /> },
+      // OVCAF gives final approval for both faculty and staff
+      { label: 'Employee Records', href: '/employees', icon: <Users className="h-5 w-5" /> },
       { label: 'All Requests', href: '/all-requests', icon: <CheckCircle className="h-5 w-5" /> },
       { label: 'My Profile', href: '/profile', icon: <User className="h-5 w-5" /> },
     ];

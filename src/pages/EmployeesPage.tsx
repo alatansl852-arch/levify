@@ -46,7 +46,6 @@ interface Employee {
   sick_leave_balance: number;
   special_privilege_leave_balance?: number;
   forced_leave_balance?: number;
-  // ✅ NEW fields (now returned by the backend)
   total_leave_credits?: number;
   total_leave_availed?: number;
   salary_grade?: number;
@@ -66,6 +65,9 @@ export default function EmployeesPage() {
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
+  // OVCAA reviews staff only. HR and OVCAF see both faculty and staff.
+  const isStaffOnly = user?.role === 'ovcaa';
+
   useEffect(() => {
     fetchEmployees();
   }, [user?.role]);
@@ -74,7 +76,7 @@ export default function EmployeesPage() {
     try {
       setIsLoading(true);
       const token = localStorage.getItem('levify_token');
-      
+
       const response = await fetch(`${API_BASE_URL}/employees/all`, {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -83,24 +85,17 @@ export default function EmployeesPage() {
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
         let filteredEmployees = data.employees;
 
-        // Filter based on user role
+        // OVCAA sees only staff (non-teaching).
+        // HR and OVCAF (final approval) see ALL employees: faculty + staff.
         if (user?.role === 'ovcaa') {
-          // OVCAA sees only staff (non-teaching). Accounts with no employee_type
-          // (HR / OVCAA / OVCAF) are excluded on purpose.
           filteredEmployees = filteredEmployees.filter(
             (emp: Employee) => emp.employee_type === 'non-teaching'
           );
-        } else if (user?.role === 'ovcaf') {
-          // OVCAF sees only faculty (teaching)
-          filteredEmployees = filteredEmployees.filter(
-            (emp: Employee) => emp.employee_type === 'teaching'
-          );
         }
-        // HR sees all employees (no filtering needed)
 
         setEmployees(filteredEmployees);
       }
@@ -117,12 +112,12 @@ export default function EmployeesPage() {
       emp.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       emp.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       emp.department.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesType = 
-      typeFilter === 'all' || 
+
+    const matchesType =
+      typeFilter === 'all' ||
       (typeFilter === 'faculty' && emp.employee_type === 'teaching') ||
       (typeFilter === 'staff' && emp.employee_type === 'non-teaching');
-    
+
     const matchesDept = deptFilter === 'all' || emp.department === deptFilter;
 
     return matchesSearch && matchesType && matchesDept;
@@ -130,24 +125,19 @@ export default function EmployeesPage() {
 
   const departments = [...new Set(employees.map((e) => e.department))].sort();
 
-  const getPageTitle = () => {
-    if (user?.role === 'ovcaa') return 'Staff Records';
-    if (user?.role === 'ovcaf') return 'Faculty Records';
-    return 'Employee Records';
-  };
+  const getPageTitle = () => (isStaffOnly ? 'Staff Records' : 'Employee Records');
 
-  const getPageDescription = () => {
-    if (user?.role === 'ovcaa') return 'View and manage staff information and leave balances';
-    if (user?.role === 'ovcaf') return 'View and manage faculty information and leave balances';
-    return 'View and manage employee information and leave balances';
-  };
+  const getPageDescription = () =>
+    isStaffOnly
+      ? 'View and manage staff information and leave balances'
+      : 'View and manage employee information and leave balances';
 
   const handleViewDetails = (emp: Employee) => {
     setSelectedEmployee(emp);
     setIsDetailsOpen(true);
   };
 
-  // simple eligibility check — has at least half a day of either leave type available
+  // simple eligibility check: has at least half a day of either leave type available
   const getEligibility = (emp: Employee) => {
     const vl = Number(emp.vacation_leave_balance) || 0;
     const sl = Number(emp.sick_leave_balance) || 0;
@@ -167,24 +157,14 @@ export default function EmployeesPage() {
             <div>
               <CardTitle className="text-lg flex items-center gap-2">
                 <Users className="h-5 w-5" />
-                {user?.role === 'ovcaa'
-                  ? 'Staff Directory'
-                  : user?.role === 'ovcaf'
-                  ? 'Faculty Directory'
-                  : 'Employee Directory'}
+                {isStaffOnly ? 'Staff Directory' : 'Employee Directory'}
               </CardTitle>
               <CardDescription>
-                {isLoading ? (
-                  'Loading employees...'
-                ) : (
-                  `${filteredEmployees.length} of ${employees.length} ${
-                    user?.role === 'ovcaa'
-                      ? 'staff members'
-                      : user?.role === 'ovcaf'
-                      ? 'faculty members'
-                      : 'employees'
-                  }`
-                )}
+                {isLoading
+                  ? 'Loading employees...'
+                  : `${filteredEmployees.length} of ${employees.length} ${
+                      isStaffOnly ? 'staff members' : 'employees'
+                    }`}
               </CardDescription>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -197,9 +177,9 @@ export default function EmployeesPage() {
                   className="pl-9 w-[250px]"
                 />
               </div>
-              
-              {/* Show type filter only for HR (OVCAA sees only staff, OVCAF only faculty) */}
-              {user?.role !== 'ovcaa' && user?.role !== 'ovcaf' && (
+
+              {/* Type filter for HR and OVCAF (OVCAA only sees staff) */}
+              {!isStaffOnly && (
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
                   <SelectTrigger className="w-[130px]">
                     <Filter className="mr-2 h-4 w-4" />
@@ -212,7 +192,7 @@ export default function EmployeesPage() {
                   </SelectContent>
                 </Select>
               )}
-              
+
               <Select value={deptFilter} onValueChange={setDeptFilter}>
                 <SelectTrigger className="w-[200px]">
                   <SelectValue placeholder="Department" />
@@ -349,7 +329,7 @@ export default function EmployeesPage() {
                   </div>
                 </div>
 
-                {/* ✅ NEW: Lifetime totals */}
+                {/* Lifetime totals */}
                 <div className="border-t pt-4 space-y-2">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground flex items-center gap-2">
