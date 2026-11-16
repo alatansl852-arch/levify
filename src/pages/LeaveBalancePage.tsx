@@ -11,6 +11,12 @@ const OVER_CAP = '#F59E0B';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
+// Whole numbers show without decimals (5), real fractions keep 2 decimals (5.50).
+function formatWholeOrDecimal(n: number): string {
+  const rounded = Math.round(n * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2);
+}
+
 // Same live-balance fetch used on the Dashboard — pulls the lifetime
 // "Total Leave Credits" number that isn't part of the LeaveContext balance shape.
 // It's no longer displayed as its own card, but Available is computed from it.
@@ -80,7 +86,7 @@ export default function LeaveBalancePage() {
       <div className="grid gap-4 md:grid-cols-2 mb-6">
         <StatCard
           title="Total Availed"
-          value={totalAvailed.toFixed(2)}
+          value={formatWholeOrDecimal(totalAvailed)}
           description="days"
           variant="primary"
         />
