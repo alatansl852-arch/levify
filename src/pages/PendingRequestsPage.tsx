@@ -124,7 +124,7 @@ function AttachmentPreview({
   fileUrl: string;
   fileType: string;
   fileName: string;
-  // ✅ Called when the HR clicks an image thumbnail — the parent shows it in
+  // Called when the HR clicks an image thumbnail — the parent shows it in
   // an in-page lightbox instead of opening a new browser tab.
   onOpenImage: (url: string, name: string) => void;
 }) {
@@ -217,6 +217,9 @@ function AttachmentPreview({
 
 export default function PendingRequestsPage() {
   const { user } = useAuth();
+  // Only OVCAF is allowed to print the leave form (they do the final approval).
+  const canPrint = user?.role === 'ovcaf';
+
   const location = useLocation();
   const [regularApps, setRegularApps] = useState<LeaveApplication[]>([]);
   const [monetizationApps, setMonetizationApps] = useState<LeaveApplication[]>([]);
@@ -228,13 +231,13 @@ export default function PendingRequestsPage() {
   const [loadingAttachments, setLoadingAttachments] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [remarks, setRemarks] = useState('');
-  // ✅ Holds the application that just received its final approval, so we can
+  // Holds the application that just received its final approval, so we can
   // show a "Ready to Print" confirmation instead of just closing the dialog.
   const [printReadyApp, setPrintReadyApp] = useState<CombinedApplication | null>(null);
-  // ✅ True while the print dialog is being opened for the approved form.
+  // True while the print dialog is being opened for the approved form.
   // Printing happens right here in the same tab (no new tab, no side panel).
   const [printing, setPrinting] = useState(false);
-  // ✅ In-page image viewer for attachments (replaces opening a new tab).
+  // In-page image viewer for attachments (replaces opening a new tab).
   const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null);
 
   useEffect(() => {
@@ -340,10 +343,11 @@ export default function PendingRequestsPage() {
       if (data.success) {
         toast.success(`Application ${action} successfully`);
 
-        // ✅ Trust the backend's own verdict (nextApprover === null means this
-        // WAS the final approval step) instead of the frontend's user.role,
-        // which can silently mismatch the DB's role casing/format.
-        const isFinalApproval = action === 'approved' && data.nextApprover === null;
+        // The "Fully Approved → Print" dialog only appears for OVCAF, and only
+        // when the backend says this WAS the final approval step
+        // (nextApprover === null). HR and OVCAA just get the normal close.
+        const isFinalApproval =
+          canPrint && action === 'approved' && data.nextApprover === null;
 
         if (isFinalApproval && viewRequest) {
           setPrintReadyApp(viewRequest);
@@ -810,7 +814,7 @@ export default function PendingRequestsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ✅ In-page image viewer — opens on top of the Review dialog when the
+      {/* In-page image viewer — opens on top of the Review dialog when the
           HR clicks an attachment thumbnail, so no new browser tab is needed. */}
       <Dialog open={!!lightbox} onOpenChange={(open) => { if (!open) setLightbox(null); }}>
         <DialogContent className="max-w-none sm:max-w-none w-[96vw] h-[94vh] p-3 sm:p-4 flex flex-col gap-2">
@@ -834,9 +838,9 @@ export default function PendingRequestsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Ready to Print — shown only after the request receives its final approval */}
+      {/* Ready to Print — OVCAF only, shown after the request receives its final approval */}
       <Dialog
-        open={!!printReadyApp}
+        open={!!printReadyApp && canPrint}
         onOpenChange={() => {
           setPrintReadyApp(null);
           setPrinting(false);
@@ -870,8 +874,8 @@ export default function PendingRequestsPage() {
       </Dialog>
 
       {/* Prints the CSC leave form right in this tab — loads the data, then opens
-          the print dialog by itself. Nothing is shown on screen. */}
-      {printing && printReadyApp && (
+          the print dialog by itself. Nothing is shown on screen. OVCAF only. */}
+      {canPrint && printing && printReadyApp && (
         <PrintableLeaveForm
           applicationId={printReadyApp.id}
           autoPrint

@@ -5,6 +5,7 @@ import { StatCard } from '@/components/ui/stat-card';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import PrintableLeaveForm from '@/components/PrintableLeaveForm';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   ChevronDown,
   ChevronRight,
@@ -58,6 +59,10 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export default function AllRequestsPage() {
+  const { user } = useAuth();
+  // Only OVCAF is allowed to print the leave form.
+  const canPrint = user?.role === 'ovcaf';
+
   const [isLoading, setIsLoading] = useState(true);
   const [summary, setSummary] = useState<Summary>({
     totalRequests: 0,
@@ -178,9 +183,6 @@ export default function AllRequestsPage() {
       ) : (
         <>
           {/* Summary Cards */}
-          {/* "Avg. Processing" card removed — its calculation always rounded
-              down to 0.0 for quickly-processed test data, which was confusing
-              rather than informative. */}
           <div className="grid gap-4 md:grid-cols-3 mb-6">
             <StatCard
               title="Total Requests"
@@ -224,6 +226,8 @@ export default function AllRequestsPage() {
                         const isExpanded = expandedIds.has(item.id);
                         const statusInfo = getStatusInfo(item);
                         const isFullyApproved = item.status === 'approved';
+                        // Print button: OVCAF only, and only when HR + OVCAA + OVCAF all approved.
+                        const showPrintButton = canPrint && isFullyApproved;
                         const isPrintingThis = printingId === item.id;
                         return (
                           <React.Fragment key={item.id}>
@@ -285,8 +289,8 @@ export default function AllRequestsPage() {
                                     </p>
                                   )}
 
-                                  {/* Print button — only for fully approved requests */}
-                                  {isFullyApproved && (
+                                  {/* Print button — OVCAF only, fully approved requests only */}
+                                  {showPrintButton && (
                                     <div className="flex justify-end mt-4">
                                       <Button
                                         size="sm"
@@ -323,7 +327,7 @@ export default function AllRequestsPage() {
 
       {/* Prints the CSC leave form in this same tab — loads the data, then opens
           the print dialog by itself. Nothing is shown on screen. */}
-      {printingId !== null && (
+      {canPrint && printingId !== null && (
         <PrintableLeaveForm
           applicationId={printingId}
           autoPrint
