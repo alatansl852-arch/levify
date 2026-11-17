@@ -6,8 +6,18 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/ui/stat-card';
 
-const PRIMARY  = '#7C2D3A';
-const OVER_CAP = '#F59E0B';
+const PRIMARY = '#7C2D3A';
+// Lighter maroon for the portion of VL/SL that is beyond the 60-day reference.
+const BEYOND = '#D9B3BA';
+
+// Info (blue) colors for the banner and badge.
+const INFO_BG = '#EAF2FB';
+const INFO_BORDER = '#B5D4F4';
+const INFO_TEXT = '#0C447C';
+
+// LEVIFY reference threshold for VL/SL. This is a system setting,
+// not a forfeiture limit: credits above it stay accumulated.
+const REFERENCE_DAYS = 60;
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
@@ -63,14 +73,15 @@ export default function LeaveBalancePage() {
   const fl  = balance?.forcedLeave      ?? 0;
   const totalAvailed = balance?.totalUsed ?? 0;
 
+  // accumulates = true for VL/SL (credits carry over, no forfeiture).
   const leaveTypes = [
-    { name: 'Vacation Leave',          sub: 'Earns 1.25 days/month', value: vl,  max: 60 },
-    { name: 'Sick Leave',              sub: 'Earns 1.25 days/month', value: sl,  max: 60 },
-    { name: 'Special Privilege Leave', sub: '3 days per year',        value: spl, max: 3  },
-    { name: 'Forced Leave',            sub: '5 days per year',        value: fl,  max: 5  },
+    { name: 'Vacation Leave',          sub: 'Earns 1.25 days/month', value: vl,  max: REFERENCE_DAYS, accumulates: true  },
+    { name: 'Sick Leave',              sub: 'Earns 1.25 days/month', value: sl,  max: REFERENCE_DAYS, accumulates: true  },
+    { name: 'Special Privilege Leave', sub: '3 days per year',        value: spl, max: 3,              accumulates: false },
+    { name: 'Forced Leave',            sub: '5 days per year',        value: fl,  max: 5,              accumulates: false },
   ];
 
-  const hasOverCap = leaveTypes.some(l => l.value > l.max);
+  const hasBeyondReference = leaveTypes.some((l) => l.accumulates && l.value > l.max);
 
   // Available = Total Leave Credits − Total Availed
   const available = (totalLeaveCredits ?? 0) - totalAvailed;
@@ -98,12 +109,16 @@ export default function LeaveBalancePage() {
         />
       </div>
 
-      {/* ── Over-cap warning ── */}
-      {hasOverCap && (
-        <div className="mb-4 flex items-start gap-2 rounded-lg border border-yellow-300 bg-yellow-50 px-4 py-3">
-          <span className="text-base">⚠️</span>
-          <p className="text-sm text-yellow-800">
-            You have leave days over the 60-day cap. Use them before they go to waste.
+      {/* ── Info banner (beyond 60-day reference) ── */}
+      {hasBeyondReference && (
+        <div
+          className="mb-4 flex items-start gap-2 rounded-lg px-4 py-3"
+          style={{ backgroundColor: INFO_BG, border: `1px solid ${INFO_BORDER}` }}
+        >
+          <span className="text-base">ℹ️</span>
+          <p className="text-sm" style={{ color: INFO_TEXT }}>
+            Your leave credits exceed {REFERENCE_DAYS} days. Credits above {REFERENCE_DAYS} days
+            remain accumulated and are not forfeited.
           </p>
         </div>
       )}
@@ -118,10 +133,10 @@ export default function LeaveBalancePage() {
         </CardHeader>
         <CardContent>
           {/* Legend — bars show the current available balance per type */}
-          <div className="flex gap-5 mb-6">
+          <div className="flex gap-5 mb-6 flex-wrap">
             {[
               { color: PRIMARY,   label: 'Available' },
-              { color: OVER_CAP,  label: 'Over cap'  },
+              { color: BEYOND,    label: `Beyond ${REFERENCE_DAYS} days` },
               { color: '#E5E7EB', label: 'Room left' },
             ].map((item) => (
               <div key={item.label} className="flex items-center gap-1.5">
@@ -134,11 +149,11 @@ export default function LeaveBalancePage() {
           {/* Leave rows */}
           <div className="space-y-6">
             {leaveTypes.map((leave) => {
-              const isOver  = leave.value > leave.max;
-              const isFull  = leave.value === leave.max;
-              const pct     = Math.min((leave.value / leave.max) * 100, 100);
-              const basePct = isOver ? (leave.max / leave.value) * 100 : pct;
-              const overAmt = isOver ? (leave.value - leave.max).toFixed(2) : null;
+              const isBeyond  = leave.accumulates && leave.value > leave.max;
+              const isFull    = !isBeyond && leave.value === leave.max;
+              const pct       = Math.min((leave.value / leave.max) * 100, 100);
+              const basePct   = isBeyond ? (leave.max / leave.value) * 100 : pct;
+              const beyondAmt = isBeyond ? (leave.value - leave.max).toFixed(2) : null;
 
               return (
                 <div key={leave.name}>
@@ -146,15 +161,19 @@ export default function LeaveBalancePage() {
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-sm text-foreground">{leave.name}</span>
-                        {isOver && (
-                          <span className="text-xs font-semibold rounded-full px-2 py-0.5"
-                            style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}>
-                            +{overAmt} over cap
+                        {isBeyond && (
+                          <span
+                            className="text-xs font-semibold rounded-full px-2 py-0.5"
+                            style={{ backgroundColor: INFO_BG, color: INFO_TEXT }}
+                          >
+                            Beyond {REFERENCE_DAYS} days
                           </span>
                         )}
-                        {isFull && !isOver && (
-                          <span className="text-xs font-semibold rounded-full px-2 py-0.5"
-                            style={{ backgroundColor: '#D1FAE5', color: '#065F46' }}>
+                        {isFull && (
+                          <span
+                            className="text-xs font-semibold rounded-full px-2 py-0.5"
+                            style={{ backgroundColor: '#D1FAE5', color: '#065F46' }}
+                          >
                             Full
                           </span>
                         )}
@@ -162,32 +181,51 @@ export default function LeaveBalancePage() {
                       <p className="text-xs text-muted-foreground mt-0.5">{leave.sub}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-xl font-bold" style={{ color: PRIMARY }}>{leave.value.toFixed(2)}</p>
-                      <p className="text-xs text-muted-foreground">of {leave.max} max days</p>
+                      <p className="text-xl font-bold" style={{ color: PRIMARY }}>
+                        {leave.value.toFixed(2)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {leave.accumulates ? 'days accumulated' : `of ${leave.max} max days`}
+                      </p>
                     </div>
                   </div>
 
                   {/* Progress bar */}
                   <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: '#F0F0F0' }}>
-                    {isOver ? (
+                    {isBeyond ? (
                       <div className="flex h-full">
                         <div style={{ width: `${basePct}%`, backgroundColor: PRIMARY, borderRadius: '4px 0 0 4px' }} />
-                        <div style={{ flex: 1, backgroundColor: OVER_CAP, borderRadius: '0 4px 4px 0' }} />
+                        <div style={{ flex: 1, backgroundColor: BEYOND, borderRadius: '0 4px 4px 0' }} />
                       </div>
                     ) : (
                       <div style={{ width: `${pct}%`, height: '100%', backgroundColor: PRIMARY, borderRadius: '4px' }} />
                     )}
                   </div>
 
-                  <p className="text-xs text-right mt-1" style={{ color: isOver ? '#92400E' : '#aaa' }}>
-                    {isOver
-                      ? `+${overAmt} over ${leave.max}-day cap`
-                      : `${pct.toFixed(0)}% of ${leave.max} days`}
-                  </p>
+                  {isBeyond ? (
+                    <div className="flex justify-between mt-1">
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <span style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: PRIMARY, display: 'inline-block' }} />
+                        {leave.max}-day reference
+                      </span>
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <span style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: BEYOND, display: 'inline-block' }} />
+                        {beyondAmt} accumulated
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-right mt-1" style={{ color: '#aaa' }}>
+                      {pct.toFixed(0)}% of {leave.max} days
+                    </p>
+                  )}
                 </div>
               );
             })}
           </div>
+
+          <p className="text-xs text-muted-foreground mt-6">
+            Monetization is subject to CSC rules and agency approval.
+          </p>
         </CardContent>
       </Card>
 
