@@ -1050,7 +1050,9 @@ export default function ApplyLeavePage() {
                 <div className="flex items-start gap-2 rounded-lg bg-muted p-3 text-sm">
                   <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                   <p className="text-muted-foreground">
-                    Your application will be reviewed by HR, then forwarded to OVCAA/OVCAF for approval.
+                    {isFaculty
+                      ? 'Your application will be reviewed by HR, then forwarded to OVCAF for final approval.'
+                      : 'Your application will be reviewed by HR, then forwarded to OVCAA, then OVCAF for final approval.'}
                   </p>
                 </div>
 

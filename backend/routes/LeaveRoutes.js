@@ -31,6 +31,16 @@ const upload = multer({
 // ✅ Helper: safely normalize DB truthy values (works for boolean, '1'/'0' strings, or 1/0 numbers)
 const isTruthy = (val) => val === true || val === '1' || val === 1 || val === 't' || val === 'true';
 
+// ✅ Helper: is this employee faculty? (checks both employee_type and role, case-insensitive)
+// Approval routing:
+//   Faculty → HR → OVCAF            (skips OVCAA; OVCAF handles monetization)
+//   Staff   → HR → OVCAA → OVCAF    (OVCAA checks the staff DTR; OVCAF checks monetization)
+const isFacultyEmployee = (user) => {
+  const type = String(user?.employee_type || '').toLowerCase();
+  const role = String(user?.role || '').toLowerCase();
+  return type === 'faculty' || role === 'faculty';
+};
+
 // Helper: notify employee by employee_id
 const notifyEmployee = async (employeeId, leaveAppId, type, title, message) => {
   try {
@@ -246,8 +256,10 @@ router.post('/process/:id', async (req, res) => {
 
     console.log('🔵 Processing application:', id, 'Action:', action, 'Approver ID:', approverIdInt);
 
+    // ✅ Also fetch the employee's type/role so we know whether to route via OVCAA (staff) or skip it (faculty)
     const [applications] = await db.query(
-      `SELECT la.*, u.full_name as employee_name, u.email as employee_email
+      `SELECT la.*, u.full_name as employee_name, u.email as employee_email,
+              u.employee_type as employee_type, u.role as employee_role
        FROM leave_applications la
        JOIN users u ON la.employee_id = u.employee_id
        WHERE la.id = $1`,
@@ -257,6 +269,7 @@ router.post('/process/:id', async (req, res) => {
     if (applications.length === 0) return res.status(404).json({ success: false, message: 'Application not found' });
 
     const application = applications[0];
+    const isFaculty = isFacultyEmployee({ employee_type: application.employee_type, role: application.employee_role });
     let newStatus, nextApprover, employeeNotifType, employeeNotifTitle, employeeNotifMessage;
 
     if (action === 'rejected') {
@@ -267,11 +280,14 @@ router.post('/process/:id', async (req, res) => {
       employeeNotifMessage  = `Your leave application (${application.application_number}) has been rejected by ${approver_role.toUpperCase()}. Remarks: ${remarks || 'None'}`;
     } else if (action === 'approved') {
       if (approver_role === 'hr') {
+        // ✅ Faculty: HR → OVCAF (skip OVCAA). Staff: HR → OVCAA.
         newStatus             = 'hr_approved';
-        nextApprover          = 'ovcaa';
+        nextApprover          = isFaculty ? 'ovcaf' : 'ovcaa';
         employeeNotifType     = 'hr_approved';
         employeeNotifTitle    = '✅ HR Approved';
-        employeeNotifMessage  = `Your leave application (${application.application_number}) has been approved by HR and forwarded to OVCAA for review.`;
+        employeeNotifMessage  = isFaculty
+          ? `Your leave application (${application.application_number}) has been approved by HR and forwarded to OVCAF for final approval.`
+          : `Your leave application (${application.application_number}) has been approved by HR and forwarded to OVCAA for review.`;
       } else if (approver_role === 'ovcaa') {
         newStatus             = 'ovcaa_approved';
         nextApprover          = 'ovcaf';
@@ -382,7 +398,7 @@ router.post('/process/:id', async (req, res) => {
       );
     }
 
-    console.log('✅ Application processed:', action, 'New status:', newStatus);
+    console.log('✅ Application processed:', action, 'New status:', newStatus, '| Next approver:', nextApprover, '| Faculty:', isFaculty);
     res.json({ success: true, message: `Application ${action} successfully`, newStatus, nextApprover });
 
   } catch (error) {
