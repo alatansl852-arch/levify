@@ -36,9 +36,10 @@ const isTruthy = (val) => val === true || val === '1' || val === 1 || val === 't
 //   Faculty → HR → OVCAF            (skips OVCAA; OVCAF handles monetization)
 //   Staff   → HR → OVCAA → OVCAF    (OVCAA checks the staff DTR; OVCAF checks monetization)
 const isFacultyEmployee = (user) => {
-  const type = String(user?.employee_type || '').toLowerCase();
-  const role = String(user?.role || '').toLowerCase();
-  return type === 'faculty' || role === 'faculty';
+  const type = String(user?.employee_type || '').trim().toLowerCase();
+  const role = String(user?.role || '').trim().toLowerCase();
+  // Exact matches only — 'non-teaching' (staff) must NOT count as faculty.
+  return type === 'teaching' || type === 'faculty' || role === 'faculty';
 };
 
 // Helper: notify employee by employee_id
